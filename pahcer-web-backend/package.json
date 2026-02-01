@@ -1,0 +1,26 @@
+{
+  "name": "pahcer-web-backend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "main": "dist/main.js",
+  "bin": {
+    "pahcer-backend": "./dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "dev": "ts-node --esm src/main.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.19.9",
+    "commander": "^14.0.2",
+    "hono": "^4.11.4",
+    "zod": "^4.3.6"
+  }
+}
