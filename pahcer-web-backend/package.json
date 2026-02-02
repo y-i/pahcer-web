@@ -10,11 +10,12 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/main.js",
-    "dev": "ts-node --esm src/main.ts"
+    "dev": "tsx src/main.ts"
   },
   "devDependencies": {
     "@types/node": "^25.0.3",
     "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
     "typescript": "~5.9.3"
   },
   "dependencies": {
