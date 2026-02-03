@@ -10,6 +10,15 @@ export const GlobalConfigSchema = z.object({
   visualizerUrl: z.string().url().optional(),
   defaultSeed: z.number().default(0),
   defaultScale: z.number().default(1.0),
+  testRunOptions: z.object({
+    shuffle: z.boolean().default(false),
+    json: z.boolean().default(false),
+    settingFile: z.string().default('pahcer_config.toml'),
+    freezeBestScores: z.boolean().default(false),
+    noResultFile: z.boolean().default(false),
+    noCompile: z.boolean().default(false),
+    extraArgs: z.string().default(''),
+  }).optional(),
 });
 
 export type GlobalConfig = z.infer<typeof GlobalConfigSchema>;
