@@ -3,6 +3,15 @@ export interface GlobalConfig {
   visualizerUrl?: string;
   defaultSeed: number;
   defaultScale: number;
+  testRunOptions?: {
+    shuffle: boolean;
+    json: boolean;
+    settingFile: string;
+    freezeBestScores: boolean;
+    noResultFile: boolean;
+    noCompile: boolean;
+    extraArgs: string;
+  };
 }
 
 export interface LocalConfig {
