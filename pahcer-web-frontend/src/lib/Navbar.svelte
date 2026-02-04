@@ -10,23 +10,34 @@
   }>();
 </script>
 
-<nav class="bg-white border-b border-gray-200 shadow-sm">
-  <div class="max-w-7xl mx-auto px-4">
-    <div class="flex justify-between h-16">
-      <div class="flex">
-        <div class="flex-shrink-0 flex items-center mr-8">
-          <span class="text-xl font-bold text-indigo-600">Pahcer Web</span>
+<nav class="bg-white border-b border-gray-200 z-50 relative">
+  <div class="w-full px-6">
+    <div class="flex justify-between h-14">
+      <div class="flex items-center gap-8">
+        <div class="flex-shrink-0 flex items-center">
+          <span class="text-lg font-bold tracking-tight text-gray-900">
+            Pahcer<span class="text-indigo-600">Web</span>
+          </span>
         </div>
-        <div class="hidden sm:-my-px sm:ml-6 sm:flex sm:space-x-8">
+        <div class="hidden sm:flex sm:space-x-1 h-full">
           {#each tabs as tab}
             <button
               onclick={() => (activeTab = tab.id)}
-              class="inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors {activeTab === tab.id ? 'border-indigo-500 text-gray-900' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'}"
+              class="relative inline-flex items-center px-4 h-full text-sm font-medium transition-all duration-200 ease-out
+                {activeTab === tab.id 
+                  ? 'text-indigo-600' 
+                  : 'text-gray-500 hover:text-gray-900 hover:bg-gray-50'}"
             >
               {tab.label}
+              {#if activeTab === tab.id}
+                <span class="absolute bottom-0 left-0 w-full h-0.5 bg-indigo-600 rounded-t-full"></span>
+              {/if}
             </button>
           {/each}
         </div>
+      </div>
+      <!-- Right side placeholder for potential global actions -->
+      <div class="flex items-center">
       </div>
     </div>
   </div>
