@@ -9,6 +9,26 @@ import { Storage, type GlobalConfig, type LocalConfig } from './storage.js';
 import { streamText } from 'hono/streaming';
 import { writeFile, readFile } from 'node:fs/promises';
 
+function getPahcerListParsed() {
+    try {
+        const output = execSync('pahcer list', { encoding: 'utf-8' });
+        const lines = output.trim().split('\n');
+        
+        // Very basic parsing: first line header, others data
+        const header = lines[0]?.split(/\s+/).filter(Boolean) || [];
+        const rows = lines.slice(1).map(line => {
+            const cols = line.split(/\s+/).filter(Boolean);
+            const obj: Record<string, string> = {};
+            header.forEach((h, i) => {
+                obj[h] = cols[i] || '';
+            });
+            return obj;
+        });
+        return { raw: output, parsed: rows };
+    } catch (e) {
+        return { raw: '', parsed: [] };
+    }
+}
 
 export async function startServer(options: any) {
     const storage = new Storage();
@@ -77,6 +97,21 @@ export async function startServer(options: any) {
       }
     });
 
+    // Analysis
+    api.post('/analysis/download', async (c) => {
+      const url = 'https://img.atcoder.jp/ahc_standings/index.html';
+      try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`Failed to fetch analysis tool: ${res.statusText}`);
+        const html = await res.text();
+        const path = storage.getAnalysisPath();
+        await writeFile(path, html);
+        return c.json({ success: true });
+      } catch (e) {
+        return c.json({ error: String(e) }, 500);
+      }
+    });
+
     // Run pahcer
     api.post('/run', async (c) => {
       const body = await c.req.json();
@@ -138,26 +173,8 @@ export async function startServer(options: any) {
 
     // List results (wrapper for pahcer list)
     api.get('/list', async (c) => {
-      try {
-        const output = execSync('pahcer list', { encoding: 'utf-8' });
-        const lines = output.trim().split('\n');
-        
-        // Very basic parsing: first line header, others data
-        // Assume space separated for now
-        const header = lines[0]?.split(/\s+/).filter(Boolean) || [];
-        const rows = lines.slice(1).map(line => {
-            const cols = line.split(/\s+/).filter(Boolean);
-            const obj: Record<string, string> = {};
-            header.forEach((h, i) => {
-                obj[h] = cols[i] || '';
-            });
-            return obj;
-        });
-
-        return c.json({ raw: output, parsed: rows });
-      } catch (e) {
-        return c.json({ error: 'Failed to run pahcer list' }, 500);
-      }
+      const result = getPahcerListParsed();
+      return c.json(result);
     });
 
     app.route('/api', api);
@@ -171,6 +188,56 @@ export async function startServer(options: any) {
         } catch {
             return c.text('Visualizer not found. Please download it from settings.', 404);
         }
+    });
+
+    // Serve Analysis Tool
+    app.get('/analysis/index.html', async (c) => {
+        const path = storage.getAnalysisPath();
+        try {
+            const content = await readFile(path);
+            return c.html(content.toString());
+        } catch {
+             // Try to download if missing
+             try {
+                const url = 'https://img.atcoder.jp/ahc_standings/index.html';
+                const res = await fetch(url);
+                if (res.ok) {
+                    const html = await res.text();
+                    await writeFile(path, html);
+                    return c.html(html);
+                }
+             } catch {}
+             return c.text('Analysis tool not found and failed to download automatically.', 404);
+        }
+    });
+
+    app.get('/analysis/input.csv', async (c) => {
+        const { parsed: rows } = getPahcerListParsed();
+        let csv = 'file,seed\n';
+        for (const row of rows) {
+            const file = row['Case'];
+            if (file) {
+                const seedMatch = file.match(/(\d+)/);
+                const seed = seedMatch ? parseInt(seedMatch[1], 10) : 0;
+                csv += `${file},${seed}\n`;
+            }
+        }
+        return c.text(csv);
+    });
+
+    app.get('/analysis/result.csv', async (c) => {
+        const { parsed: rows } = getPahcerListParsed();
+        let csv = 'author,file,score\n';
+        const author = 'Current'; 
+        for (const row of rows) {
+            const file = row['Case'];
+            const scoreStr = row['Score'];
+            if (file && scoreStr) {
+                const score = parseInt(scoreStr.replace(/,/g, ''), 10) || 0;
+                csv += `${author},${file},${score}\n`;
+            }
+        }
+        return c.text(csv);
     });
 
     // Static files
@@ -191,4 +258,5 @@ export async function startServer(options: any) {
     } catch (err) {
       console.error('Failed to start server:', err);
     }
-} 
+}
+ 
