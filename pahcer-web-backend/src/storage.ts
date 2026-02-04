@@ -118,4 +118,9 @@ export class Storage {
   getVisualizerPath(): string {
     return join(process.cwd(), this.localDir, 'visualizer.html');
   }
+
+  // Analysis
+  getAnalysisPath(): string {
+    return join(process.cwd(), this.localDir, 'analysis.html');
+  }
 }
