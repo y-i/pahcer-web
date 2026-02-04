@@ -53,7 +53,7 @@
   }
 </script>
 
-<div class="h-full overflow-y-auto bg-gray-50 p-6 md:p-8">
+<div class="h-full overflow-y-auto bg-gray-50 p-6">
   <div class="max-w-none space-y-8">
     
     <div class="flex items-center justify-between">

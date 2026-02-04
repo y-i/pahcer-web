@@ -69,9 +69,9 @@
   {:else if error}
     <div class="flex-1 flex items-center justify-center text-red-500">{error}</div>
   {:else}
-    <div class="flex-1 flex overflow-hidden">
+    <div class="flex-1 flex overflow-hidden p-6 gap-6">
       <!-- List View -->
-      <div class="{selectedRow && config.visualizerPosition === 'right' ? 'w-1/2 border-r' : selectedRow && config.visualizerPosition === 'left' ? 'w-1/2 border-l order-2' : 'w-full'} flex flex-col bg-white transition-all duration-300 shadow-sm z-0">
+      <div class="{selectedRow && config.visualizerPosition === 'right' ? 'w-1/2' : selectedRow && config.visualizerPosition === 'left' ? 'w-1/2 order-2' : 'w-full'} flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 z-0">
         <div class="px-6 py-4 border-b border-gray-200 bg-white flex justify-between items-center flex-shrink-0 z-10">
             <h2 class="text-lg font-bold text-gray-900 tracking-tight">Execution History</h2>
             <button 
@@ -131,16 +131,16 @@
 
       <!-- Visualizer View -->
       {#if selectedRow}
-        <div class="{config.visualizerPosition === 'left' ? 'order-1' : ''} w-1/2 flex flex-col bg-white border-l border-gray-200 shadow-xl z-20">
+        <div class="{config.visualizerPosition === 'left' ? 'order-1' : ''} w-1/2 flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden z-20 transition-all duration-300">
             <div class="px-4 py-3 border-b border-gray-200 bg-white flex items-center space-x-6 shadow-sm z-10">
-                <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Visualizer Controls</span>
+                <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Visualizer</span>
                 <div class="h-4 w-px bg-gray-300"></div>
                 <div class="flex items-center space-x-3">
                     <label class="text-sm font-medium text-gray-600">Seed</label>
                     <input 
                         type="number" 
                         bind:value={seed} 
-                        class="w-24 px-2 py-1 bg-gray-50 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" 
+                        class="w-20 px-2 py-1 bg-gray-50 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" 
                     />
                 </div>
                 <div class="flex items-center space-x-3">
@@ -149,7 +149,7 @@
                         type="number" 
                         step="0.1" 
                         bind:value={scale} 
-                        class="w-20 px-2 py-1 bg-gray-50 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" 
+                        class="w-16 px-2 py-1 bg-gray-50 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" 
                     />
                 </div>
                 <div class="flex-1"></div>
@@ -165,7 +165,7 @@
                 <iframe 
                     title="Visualizer"
                     src={iframeSrc} 
-                    class="absolute inset-0 w-full h-full border-0"
+                    class="w-full h-full border-none"
                 ></iframe>
             </div>
         </div>
