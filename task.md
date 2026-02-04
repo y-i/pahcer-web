@@ -22,10 +22,10 @@
     - [x] `pahcer list` の結果解析またはログファイル読み込み API
     - [x] ビジュアライザ (HTML) のダウンロード機能
     - [x] ビジュアライザ用静的ファイル配信機能
-- [ ] **スコア分析機能**
-    - [ ] `https://img.atcoder.jp/ahc_standings/index.html` ダウンロード・保存機能
-    - [ ] `input.csv`, `result.csv` 生成ロジック
-    - [ ] 分析用データ提供 API
+- [x] **スコア分析機能**
+    - [x] `https://img.atcoder.jp/ahc_standings/index.html` ダウンロード・保存機能
+    - [x] `input.csv`, `result.csv` 生成ロジック
+    - [x] 分析用データ提供 API
 - [x] **設定管理機能**
     - [x] 設定値 (ビジュアライザURL, 表示位置, seed/scale初期値) の保存・読み出し API (JSON)
 
@@ -41,8 +41,8 @@
     - [x] 結果一覧テーブル表示
     - [x] ビジュアライザ表示用 `iframe` 実装
     - [x] seed/scale 変更時の `iframe` 内更新ロジック
-- [ ] **スコア分析タブ**
-    - [ ] スコア比較・分析ビューの実装
+- [x] **スコア分析タブ**
+    - [x] スコア比較・分析ビューの実装
 - [x] **設定タブ**
     - [x] 設定変更フォーム実装
 
