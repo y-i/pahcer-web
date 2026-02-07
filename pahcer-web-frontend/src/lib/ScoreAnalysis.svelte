@@ -19,7 +19,7 @@
 </script>
 
 <div class="h-full flex flex-col bg-gray-50 p-6">
-  <div class="flex-1 flex flex-col relative bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+  <div class="max-w-none w-full flex-1 flex flex-col relative bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
     <div class="absolute top-3 right-4 z-10">
         <button 
           onclick={reloadAnalysis}
