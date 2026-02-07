@@ -43,7 +43,7 @@
 <div class="min-h-screen bg-gray-50 flex flex-col">
   <Navbar {tabs} bind:activeTab />
 
-  <main class="flex-1 overflow-hidden">
+  <main class="flex-1 overflow-hidden flex flex-col">
     {#if activeTab === 'test-run'}
       <TestRun />
     {:else if activeTab === 'history'}
