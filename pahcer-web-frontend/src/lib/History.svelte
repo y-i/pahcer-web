@@ -69,7 +69,7 @@
   {:else if error}
     <div class="flex-1 flex items-center justify-center text-red-500">{error}</div>
   {:else}
-    <div class="flex-1 flex overflow-hidden p-6 gap-6">
+    <div class="flex-1 flex overflow-hidden p-6 gap-6 max-w-none w-full">
       <!-- List View -->
       <div class="{selectedRow && config.visualizerPosition === 'right' ? 'w-1/2' : selectedRow && config.visualizerPosition === 'left' ? 'w-1/2 order-2' : 'w-full'} flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 z-0">
         <div class="px-6 py-4 border-b border-gray-200 bg-white flex justify-between items-center flex-shrink-0 z-10">
