@@ -8,7 +8,7 @@
   let error = $state('');
   let selectedRow = $state<Record<string, string> | null>(null);
   
-  let visualizerUrl = $state('/visualizer.html');
+  let visualizerUrl = $state('/visualizer/index.html');
   let config = $state<GlobalConfig>({
     visualizerPosition: 'right',
     visualizerUrl: '',
