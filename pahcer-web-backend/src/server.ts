@@ -9,9 +9,9 @@ import { Storage, type GlobalConfig, type LocalConfig } from './storage.js';
 import { streamText } from 'hono/streaming';
 import { writeFile, readFile } from 'node:fs/promises';
 
-function getPahcerListParsed() {
+function getPahcerListParsed(baseDir: string) {
     try {
-        const output = execSync('pahcer list', { encoding: 'utf-8' });
+        const output = execSync('pahcer list', { encoding: 'utf-8', cwd: baseDir });
         const lines = output.trim().split('\n');
         
         // Very basic parsing: first line header, others data
@@ -31,7 +31,8 @@ function getPahcerListParsed() {
 }
 
 export async function startServer(options: any) {
-    const storage = new Storage();
+    const baseDir = resolve(options.directory || process.cwd());
+    const storage = new Storage(baseDir);
 
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
@@ -120,7 +121,8 @@ export async function startServer(options: any) {
       return streamText(c, async (stream) => {
         const child = spawn('pahcer', ['run', ...args], {
           stdio: ['ignore', 'pipe', 'pipe'],
-          shell: true
+          shell: true,
+          cwd: baseDir
         });
 
         const jobId = Date.now().toString();
@@ -173,7 +175,7 @@ export async function startServer(options: any) {
 
     // List results (wrapper for pahcer list)
     api.get('/list', async (c) => {
-      const result = getPahcerListParsed();
+      const result = getPahcerListParsed(baseDir);
       return c.json(result);
     });
 
@@ -212,7 +214,7 @@ export async function startServer(options: any) {
     });
 
     app.get('/analysis/input.csv', async (c) => {
-        const { parsed: rows } = getPahcerListParsed();
+        const { parsed: rows } = getPahcerListParsed(baseDir);
         let csv = 'file,seed\n';
         for (const row of rows) {
             const file = row['Case'];
@@ -226,7 +228,7 @@ export async function startServer(options: any) {
     });
 
     app.get('/analysis/result.csv', async (c) => {
-        const { parsed: rows } = getPahcerListParsed();
+        const { parsed: rows } = getPahcerListParsed(baseDir);
         let csv = 'author,file,score\n';
         const author = 'Current'; 
         for (const row of rows) {
