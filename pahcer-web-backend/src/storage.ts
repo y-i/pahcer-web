@@ -36,7 +36,7 @@ export const JobMetadataSchema = z.object({
   args: z.array(z.string()),
   status: z.enum(['running', 'success', 'failed']),
   outputFile: z.string().optional(),
-  result: z.record(z.any()).optional(), // Store detailed results (score, etc.)
+  result: z.record(z.string(), z.any()).optional(), // Store detailed results (score, etc.)
 });
 
 export type JobMetadata = z.infer<typeof JobMetadataSchema>;
@@ -48,8 +48,10 @@ export const JobsSchema = z.array(JobMetadataSchema);
 export class Storage {
   private globalConfigPath: string;
   private localDir: string = '.pahcer-web';
+  private baseDir: string;
 
-  constructor() {
+  constructor(baseDir: string = process.cwd()) {
+    this.baseDir = baseDir;
     const configHome = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
     this.globalConfigPath = join(configHome, 'pahcer-web', 'config.json');
   }
@@ -71,7 +73,7 @@ export class Storage {
 
   // Local Config
   private getLocalConfigPath(): string {
-    return join(process.cwd(), this.localDir, 'config.json');
+    return join(this.baseDir, this.localDir, 'config.json');
   }
 
   async getLocalConfig(): Promise<LocalConfig> {
@@ -84,13 +86,13 @@ export class Storage {
   }
 
   async saveLocalConfig(config: LocalConfig): Promise<void> {
-    await mkdir(join(process.cwd(), this.localDir), { recursive: true });
+    await mkdir(join(this.baseDir, this.localDir), { recursive: true });
     await writeFile(this.getLocalConfigPath(), JSON.stringify(config, null, 2));
   }
 
   // Jobs
   private getJobsPath(): string {
-    return join(process.cwd(), this.localDir, 'jobs.json');
+    return join(this.baseDir, this.localDir, 'jobs.json');
   }
 
   async getJobs(): Promise<JobMetadata[]> {
@@ -110,17 +112,17 @@ export class Storage {
     } else {
       jobs.push(job);
     }
-    await mkdir(join(process.cwd(), this.localDir), { recursive: true });
+    await mkdir(join(this.baseDir, this.localDir), { recursive: true });
     await writeFile(this.getJobsPath(), JSON.stringify(jobs, null, 2));
   }
 
   // Visualizer
   getVisualizerPath(): string {
-    return join(process.cwd(), this.localDir, 'visualizer.html');
+    return join(this.baseDir, this.localDir, 'visualizer.html');
   }
 
   // Analysis
   getAnalysisPath(): string {
-    return join(process.cwd(), this.localDir, 'analysis.html');
+    return join(this.baseDir, this.localDir, 'analysis.html');
   }
 }
