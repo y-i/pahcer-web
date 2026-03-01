@@ -58,6 +58,11 @@ export const api = {
     return res.json();
   },
 
+  async getVisualizerStatus(): Promise<{ exists: boolean }> {
+    const res = await fetch('/api/visualizer/status');
+    return res.json();
+  },
+
   async downloadVisualizer(url: string): Promise<void> {
     const res = await fetch('/api/visualizer/download', {
       method: 'POST',
