@@ -7,7 +7,7 @@ import { spawn, execSync } from 'node:child_process';
 
 import { Storage, type GlobalConfig, type LocalConfig } from './storage.js';
 import { streamText } from 'hono/streaming';
-import { writeFile, readFile } from 'node:fs/promises';
+import { writeFile, readFile, mkdir, rm } from 'node:fs/promises';
 
 function getPahcerListParsed(baseDir: string) {
     try {
@@ -30,14 +30,82 @@ function getPahcerListParsed(baseDir: string) {
     }
 }
 
+async function downloadRecursive(url: string, destDir: string) {
+    const visited = new Set<string>();
+    const queue: { url: string; relPath: string }[] = [{ url, relPath: 'index.html' }];
+
+    // 同名の .js と _bg.wasm を明示的に追加（wasm-bindgen等で動的にロードされる場合があるため）
+    try {
+        const u = new URL(url);
+        const path = u.pathname;
+        if (path.endsWith('.html')) {
+            const base = path.substring(path.lastIndexOf('/') + 1, path.lastIndexOf('.html'));
+            const dirUrl = url.substring(0, url.lastIndexOf('/') + 1);
+            queue.push({ url: dirUrl + base + '.js', relPath: base + '.js' });
+            queue.push({ url: dirUrl + base + '_bg.wasm', relPath: base + '_bg.wasm' });
+        }
+    } catch (e) {
+        console.error('Failed to parse base name for visualizer siblings:', e);
+    }
+
+    await mkdir(destDir, { recursive: true });
+
+    while (queue.length > 0) {
+        const { url: currentUrl, relPath } = queue.shift()!;
+        if (visited.has(currentUrl)) continue;
+        visited.add(currentUrl);
+
+        try {
+            const res = await fetch(currentUrl);
+            if (!res.ok) continue;
+
+            const contentType = res.headers.get('content-type') || '';
+            const buffer = await res.arrayBuffer();
+            const filePath = join(destDir, relPath);
+            await mkdir(dirname(filePath), { recursive: true });
+            await writeFile(filePath, Buffer.from(buffer));
+
+            // HTMLまたはCSSをパースして追加のリソースを探す
+            if (contentType.includes('text/html') || contentType.includes('text/css')) {
+                const text = new TextDecoder().decode(buffer);
+                // HTML用
+                const resourceRegex = /(?:src|href|content)\s*=\s*["']([^"']+\.(?:js|css|wasm|png|jpg|svg|ico|json))["']/gi;
+                // CSS用 (url(...))
+                const cssResourceRegex = /url\(['"]?([^'"]+\.(?:png|jpg|svg|ico|wasm|woff2?))['"]?\)/gi;
+                
+                let match;
+                while ((match = resourceRegex.exec(text)) !== null) {
+                    const foundPath = match[1];
+                    if (foundPath.startsWith('http') || foundPath.startsWith('//') || foundPath.startsWith('data:')) continue;
+                    
+                    const resourceUrl = new URL(foundPath, currentUrl).toString();
+                    if (!visited.has(resourceUrl)) {
+                        queue.push({ url: resourceUrl, relPath: foundPath.replace(/^\//, '') });
+                    }
+                }
+                while ((match = cssResourceRegex.exec(text)) !== null) {
+                    const foundPath = match[1];
+                    if (foundPath.startsWith('http') || foundPath.startsWith('//') || foundPath.startsWith('data:')) continue;
+                    
+                    const resourceUrl = new URL(foundPath, currentUrl).toString();
+                    if (!visited.has(resourceUrl)) {
+                        queue.push({ url: resourceUrl, relPath: foundPath.replace(/^\//, '') });
+                    }
+                }
+            }
+        } catch (e) {
+            console.error(`Failed to download ${currentUrl}:`, e);
+        }
+    }
+}
+
 export async function startServer(options: any) {
     const baseDir = resolve(options.directory || process.cwd());
     const storage = new Storage(baseDir);
 
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
-    const currentDir = __dirname;
-    const backendRoot = resolve(currentDir, '..'); 
+    const backendRoot = resolve(__dirname, '..'); 
     const frontendDir = resolve(backendRoot, '../pahcer-web-frontend');
     const distDir = join(frontendDir, 'dist');
     
@@ -82,16 +150,21 @@ export async function startServer(options: any) {
     });
 
     // Visualizer
+    api.get('/visualizer/status', async (c) => {
+        const exists = await storage.hasVisualizer();
+        return c.json({ exists });
+    });
+
     api.post('/visualizer/download', async (c) => {
       const { url } = await c.req.json();
       if (!url) return c.json({ error: 'URL is required' }, 400);
       
       try {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`Failed to fetch visualizer: ${res.statusText}`);
-        const html = await res.text();
-        const path = storage.getVisualizerPath();
-        await writeFile(path, html);
+        const destDir = storage.getVisualizerDir();
+        // Clear existing
+        try { await rm(destDir, { recursive: true, force: true }); } catch {}
+        
+        await downloadRecursive(url, destDir);
         return c.json({ success: true });
       } catch (e) {
         return c.json({ error: String(e) }, 500);
@@ -152,7 +225,6 @@ export async function startServer(options: any) {
           child.on('close', (code) => resolve(code ?? 0));
         });
 
-        // Simple extraction logic (can be improved based on actual pahcer output)
         const allOutput = fullLogs.join('');
         const scoreMatch = allOutput.match(/Score\s*=\s*([\d,]+)/i);
         const score = scoreMatch ? parseInt(scoreMatch[1].replace(/,/g, '')) : undefined;
@@ -181,7 +253,27 @@ export async function startServer(options: any) {
 
     app.route('/api', api);
 
-    // Serve Visualizer HTML specially if needed
+    // Serve Visualizer Directory
+    const visualizerDir = storage.getVisualizerDir();
+    app.get('/visualizer/*', async (c) => {
+        const relPath = c.req.path.replace('/visualizer/', '') || 'index.html';
+        const filePath = join(visualizerDir, relPath);
+        try {
+            const content = await readFile(filePath);
+            const contentType = relPath.endsWith('.js') ? 'application/javascript' : 
+                               relPath.endsWith('.css') ? 'text/css' : 
+                               relPath.endsWith('.wasm') ? 'application/wasm' :
+                               relPath.endsWith('.html') ? 'text/html' :
+                               relPath.endsWith('.png') ? 'image/png' :
+                               relPath.endsWith('.jpg') ? 'image/jpeg' :
+                               relPath.endsWith('.svg') ? 'image/svg+xml' :
+                               'application/octet-stream';
+            return c.body(content, 200, { 'Content-Type': contentType });
+        } catch {
+            return c.text('Not Found', 404);
+        }
+    });
+
     app.get('/visualizer.html', async (c) => {
         const path = storage.getVisualizerPath();
         try {
@@ -261,4 +353,3 @@ export async function startServer(options: any) {
       console.error('Failed to start server:', err);
     }
 }
- 
