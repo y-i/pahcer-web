@@ -7,7 +7,7 @@ import { z } from 'zod';
 
 export const GlobalConfigSchema = z.object({
   visualizerPosition: z.enum(['left', 'right']).default('right'),
-  visualizerUrl: z.string().url().optional(),
+  visualizerUrl: z.string().optional(),
   defaultSeed: z.number().default(0),
   defaultScale: z.number().default(1.0),
   testRunOptions: z.object({
@@ -24,7 +24,7 @@ export const GlobalConfigSchema = z.object({
 export type GlobalConfig = z.infer<typeof GlobalConfigSchema>;
 
 export const LocalConfigSchema = z.object({
-  visualizerUrl: z.string().url().optional(),
+  visualizerUrl: z.string().optional(),
 });
 
 export type LocalConfig = z.infer<typeof LocalConfigSchema>;
@@ -117,8 +117,21 @@ export class Storage {
   }
 
   // Visualizer
+  getVisualizerDir(): string {
+    return join(this.baseDir, this.localDir, 'visualizer');
+  }
+
   getVisualizerPath(): string {
-    return join(this.baseDir, this.localDir, 'visualizer.html');
+    return join(this.getVisualizerDir(), 'index.html');
+  }
+
+  async hasVisualizer(): Promise<boolean> {
+    try {
+      const data = await readFile(this.getVisualizerPath());
+      return data.length > 0;
+    } catch {
+      return false;
+    }
   }
 
   // Analysis
