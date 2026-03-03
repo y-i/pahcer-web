@@ -7,7 +7,7 @@
   let isLoading = $state(true);
   let error = $state('');
   let selectedRow = $state<Record<string, string> | null>(null);
-  
+
   let visualizerUrl = $state('/visualizer/index.html');
   let config = $state<GlobalConfig>({
     visualizerPosition: 'right',
@@ -18,7 +18,7 @@
 
   // Visualizer controls
   let seed = $state(0);
-  let scale = $state(1.0);
+  let scalePercent = $state(100);
   let iframeSrc = $state('');
 
   onMount(async () => {
@@ -30,9 +30,9 @@
       listData = listRes.parsed;
       rawOutput = listRes.raw;
       config = configRes.global;
-      
+
       seed = config.defaultSeed;
-      scale = config.defaultScale;
+      scalePercent = Math.round(config.defaultScale * 100);
     } catch (e) {
       error = 'Failed to load data';
       console.error(e);
@@ -43,14 +43,20 @@
 
   function selectRow(row: Record<string, string>) {
     selectedRow = row;
+    // Reset to default values from config when opening a new result
+    seed = config.defaultSeed;
+    scalePercent = Math.round(config.defaultScale * 100);
     updateVisualizer();
   }
 
   function updateVisualizer() {
+    if (!selectedRow) return;
+    const scale = scalePercent / 100;
     iframeSrc = `${visualizerUrl}?seed=${seed}&scale=${scale}`;
   }
 
   $effect(() => {
+    // selectedRow, seed, scalePercent のいずれかが変更されたら更新
     if (selectedRow) {
         updateVisualizer();
     }
@@ -69,9 +75,11 @@
   {:else if error}
     <div class="flex-1 flex items-center justify-center text-red-500">{error}</div>
   {:else}
-    <div class="flex-1 flex overflow-hidden p-6 gap-6 max-w-none w-full">
+    <div class="flex-1 flex overflow-hidden p-6 max-w-none w-full">
       <!-- List View -->
-      <div class="{selectedRow && config.visualizerPosition === 'right' ? 'w-1/2' : selectedRow && config.visualizerPosition === 'left' ? 'w-1/2 order-2' : 'w-full'} flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 z-0">
+      <div class="{selectedRow ? 'w-[calc(50%-0.75rem)]' : 'w-full'} 
+                  {config.visualizerPosition === 'left' ? 'order-2' : 'order-1'} 
+                  flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 z-0">
         <div class="px-6 py-4 border-b border-gray-200 bg-white flex justify-between items-center flex-shrink-0 z-10">
             <h2 class="text-lg font-bold text-gray-900 tracking-tight">Execution History</h2>
             <button 
@@ -130,46 +138,50 @@
       </div>
 
       <!-- Visualizer View -->
-      {#if selectedRow}
-        <div class="{config.visualizerPosition === 'left' ? 'order-1' : ''} w-1/2 flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden z-20 transition-all duration-300">
-            <div class="px-4 py-3 border-b border-gray-200 bg-white flex items-center space-x-6 shadow-sm z-10">
-                <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">Visualizer</span>
-                <div class="h-4 w-px bg-gray-300"></div>
-                <div class="flex items-center space-x-3">
-                    <label class="text-sm font-medium text-gray-600">Seed</label>
+      <div class="{selectedRow ? 'w-[calc(50%-0.75rem)] opacity-100' : 'w-0 opacity-0 border-0 p-0 overflow-hidden'} 
+                  {config.visualizerPosition === 'left' ? 'order-1' : 'order-2'}
+                  {config.visualizerPosition === 'left' && selectedRow ? 'mr-6' : ''}
+                  {config.visualizerPosition === 'right' && selectedRow ? 'ml-6' : ''}
+                  flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden z-20 transition-all duration-300">
+        {#if selectedRow}
+            <div class="px-4 py-3 border-b border-gray-200 bg-white flex items-center space-x-6 shadow-sm z-10 min-w-0">
+                <span class="text-xs font-bold text-gray-400 uppercase tracking-wider flex-shrink-0">Visualizer</span>
+                <div class="h-4 w-px bg-gray-300 flex-shrink-0"></div>
+                <div class="flex items-center space-x-3 min-w-0">
+                    <label class="text-sm font-medium text-gray-600 whitespace-nowrap">Seed</label>
                     <input 
                         type="number" 
                         bind:value={seed} 
                         class="w-20 px-2 py-1 bg-gray-50 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" 
                     />
                 </div>
-                <div class="flex items-center space-x-3">
-                    <label class="text-sm font-medium text-gray-600">Scale</label>
+                <div class="flex items-center space-x-3 min-w-0">
+                    <label class="text-sm font-medium text-gray-600 whitespace-nowrap">Scale (%)</label>
                     <input 
                         type="number" 
-                        step="0.1" 
-                        bind:value={scale} 
+                        step="5"
+                        bind:value={scalePercent} 
                         class="w-16 px-2 py-1 bg-gray-50 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" 
                     />
                 </div>
                 <div class="flex-1"></div>
                 <button 
                     onclick={() => selectedRow = null} 
-                    class="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                    class="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors flex-shrink-0"
                     title="Close Visualizer"
                 >
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
             </div>
-            <div class="flex-1 relative bg-gray-50">
+            <div class="flex-1 relative bg-gray-50 min-w-0">
                 <iframe 
                     title="Visualizer"
                     src={iframeSrc} 
                     class="w-full h-full border-none"
                 ></iframe>
             </div>
-        </div>
-      {/if}
+        {/if}
+      </div>
     </div>
   {/if}
 </div>
