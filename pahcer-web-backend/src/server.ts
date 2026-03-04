@@ -504,7 +504,7 @@ export async function startServer(options: any) {
                     const params = new URLSearchParams(window.location.search);
                     const outputUrl = params.get('output_url');
                     if (outputUrl) {
-                        constHZres = await fetch(outputUrl);
+                        const res = await fetch(outputUrl);
                         if (res.ok) {
                             const text = await res.text();
                             const inputEl = document.getElementById('input') || document.querySelector('textarea');
