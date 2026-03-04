@@ -238,14 +238,14 @@ export async function startServer(options: any) {
       for (let i = 0; i < args.length; i++) {
           if (args[i] === '-c' || args[i] === '--comment') {
               comment = args[i+1] || '';
-              // Quote the comment for shell execution if it contains spaces and isn't quoted
+              // Quote the comment for shell execution if it isn't quoted
               if (args[i+1] && !args[i+1].startsWith('"') && !args[i+1].startsWith("'")) {
                   args[i+1] = `"${args[i+1]}"`;
               }
           }
           if (args[i] === '-t' || args[i] === '--tag') {
               tag = args[i+1] || '';
-              // Quote the tag for shell execution if it contains spaces and isn't quoted
+              // Quote the tag for shell execution if it isn't quoted
               if (args[i+1] && !args[i+1].startsWith('"') && !args[i+1].startsWith("'")) {
                   args[i+1] = `"${args[i+1]}"`;
               }
@@ -296,93 +296,72 @@ export async function startServer(options: any) {
 
         const allOutput = fullLogs.join('');
         
-        // Parse JSON output from pahcer
-        let parsedResult: any = null;
+        // Parse JSON output from pahcer (NDJSON support)
+        let collectedDetails: any[] = [];
+        const lines = allOutput.split('\n');
         
-        // Robust JSON extraction: Find the last valid JSON block
-        try {
-            // Find start indices of potential JSON blocks
-            const lastOpenBracket = allOutput.lastIndexOf('[');
-            const lastOpenBrace = allOutput.lastIndexOf('{');
-            const startIdx = Math.max(lastOpenBracket, lastOpenBrace);
-            
-            if (startIdx >= 0) {
-                // Try to find the matching closing character
-                const startChar = allOutput[startIdx];
-                const endChar = startChar === '[' ? ']' : '}';
-                const endIdx = allOutput.lastIndexOf(endChar);
-                
-                if (endIdx > startIdx) {
-                    const candidate = allOutput.substring(startIdx, endIdx + 1);
-                    try {
-                        parsedResult = JSON.parse(candidate);
-                    } catch {
-                        // If strict slice fails, maybe there's some noise, try finding balanced (simple check)
-                        // or just rely on regex fallback if this simple slice failed.
-                    }
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            try {
+                const obj = JSON.parse(trimmed);
+                // Check for single case result
+                if (obj.seed !== undefined && obj.score !== undefined) {
+                    collectedDetails.push(obj);
+                } 
+                // Check for array of results (summary)
+                else if (Array.isArray(obj)) {
+                    collectedDetails = collectedDetails.concat(obj);
                 }
+                // Check for object with results
+                else if (obj.results && Array.isArray(obj.results)) {
+                    collectedDetails = collectedDetails.concat(obj.results);
+                }
+            } catch (e) {
+                // Ignore non-JSON lines
             }
-        } catch (e) {
-            console.error('Failed to parse pahcer JSON output', e);
         }
 
-        // Default stats if parsing fails
+        // Deduplicate by seed
+        const detailsMap = new Map<string, any>();
+        for (const d of collectedDetails) {
+            if (d.seed !== undefined) {
+                detailsMap.set(String(d.seed), d);
+            }
+        }
+        
+        const details = Array.from(detailsMap.values());
+
+        // Default stats
         let stats = {
             avgScore: 0,
             avgLogScore: 0,
             maxTime: 0,
-            cases: 0,
-            details: [] as any[]
+            cases: details.length,
+            details: details
         };
 
-        if (Array.isArray(parsedResult)) {
-            // Standard pahcer output: array of result objects
-            stats.details = parsedResult;
-            stats.cases = parsedResult.length;
-            if (stats.cases > 0) {
-                const totalScore = parsedResult.reduce((sum, r) => sum + (r.score || 0), 0);
-                stats.avgScore = totalScore / stats.cases;
-                
-                const totalLogScore = parsedResult.reduce((sum, r) => sum + Math.log10(Math.max(1, r.score || 0)), 0);
-                stats.avgLogScore = totalLogScore / stats.cases;
+        if (stats.cases > 0) {
+            const totalScore = details.reduce((sum, r) => sum + (Number(r.score) || 0), 0);
+            stats.avgScore = totalScore / stats.cases;
+            
+            const totalLogScore = details.reduce((sum, r) => sum + Math.log10(Math.max(1, Number(r.score) || 0)), 0);
+            stats.avgLogScore = totalLogScore / stats.cases;
 
-                stats.maxTime = Math.max(...parsedResult.map(r => r.time || 0));
-            }
-        } else if (parsedResult && typeof parsedResult === 'object') {
-             // Handle potential object wrapper (e.g. { results: [...] })
-             // Check if it has a 'results' or similar array, or if it is a single result
-             const list = Array.isArray(parsedResult.results) ? parsedResult.results : 
-                          Array.isArray(parsedResult.cases) ? parsedResult.cases : null;
-             
-             if (list) {
-                 stats.details = list;
-                 stats.cases = list.length;
-                 if (stats.cases > 0) {
-                    const totalScore = list.reduce((sum: number, r: any) => sum + (r.score || 0), 0);
-                    stats.avgScore = totalScore / stats.cases;
-                    const totalLogScore = list.reduce((sum: number, r: any) => sum + Math.log10(Math.max(1, r.score || 0)), 0);
-                    stats.avgLogScore = totalLogScore / stats.cases;
-                    stats.maxTime = Math.max(...list.map((r: any) => r.time || 0));
-                 }
-             } else if (parsedResult.score !== undefined) {
-                 // Single result object
-                 stats.details = [parsedResult];
-                 stats.cases = 1;
-                 stats.avgScore = parsedResult.score;
-                 stats.avgLogScore = Math.log10(Math.max(1, parsedResult.score));
-                 stats.maxTime = parsedResult.time || 0;
-             }
-        }
-
-        // Fallback to regex extraction if JSON parsing failed or didn't give expected array
-        // (This handles non-JSON output or catastrophic parsing failure)
-        if (stats.cases === 0) {
+            stats.maxTime = Math.max(...details.map(r => {
+                // Use execution_time (seconds) * 1000 => ms, or time (unknown unit, assume seconds if small?)
+                // Pahcer output 'execution_time' is seconds.
+                const t = r.execution_time !== undefined ? Number(r.execution_time) : (Number(r.time) || 0);
+                return t * 1000;
+            }));
+        } else {
+             // Fallback to regex extraction if JSON parsing failed completely
              const scoreMatch = allOutput.match(/Score\s*=\s*([\d,]+)/i);
              const score = scoreMatch ? parseInt(scoreMatch[1].replace(/,/g, '')) : 0;
              if (score > 0) {
                  stats.avgScore = score;
                  stats.avgLogScore = Math.log10(score);
-                 stats.cases = 1; // Treat as single if regex found something
+                 stats.cases = 1; 
              }
         }
 
