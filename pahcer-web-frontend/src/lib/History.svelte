@@ -76,7 +76,25 @@
   });
 
   function formatDate(iso: string) {
-      return new Date(iso).toLocaleString();
+      const d = new Date(iso);
+      const padjw = (n: number) => n.toString().padStart(2, '0');
+      return `${d.getFullYear()}/${padjw(d.getMonth() + 1)}/${padjw(d.getDate())} ${padjw(d.getHours())}:${padjw(d.getMinutes())}:${padjw(d.getSeconds())}`;
+  }
+
+  function formatScore(n: number) {
+      return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function formatRelative(n: number) {
+      const s = n.toFixed(4);
+      const parts = s.split('.');
+      // Integer part should be padded to 4 chars
+      const intPart = parts[0].padStart(4, ' ');
+      return `${intPart}.${parts[1]}`;
+  }
+
+  function formatTime(n: number) {
+      return n.toFixed(4);
   }
 </script>
 
@@ -112,10 +130,10 @@
                     <tr>
                         <th scope="col" class="px-3 py-3 w-8 bg-gray-50"></th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Date</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Cases</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Avg Score</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Avg Log</th>
-                        <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Max Time</th>
+                        <th scope="col" class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Cases</th>
+                        <th scope="col" class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Avg Score</th>
+                        <th scope="col" class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Avg Log</th>
+                        <th scope="col" class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Max Time</th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Comment</th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Tag</th>
                     </tr>
@@ -140,10 +158,10 @@
                                 </button>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono">{formatDate(row.datetime)}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono">{row.cases}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-mono font-medium">{Math.round(row.avgScore).toLocaleString()}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono">{row.avgLogScore.toFixed(3)}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono">{Math.round(row.maxTime)}ms</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right">{row.cases}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-mono font-medium text-right">{formatScore(row.avgScore)}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right">{row.avgLogScore.toFixed(3)}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right">{Math.round(row.maxTime)}ms</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{row.comment || '-'}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                 {#if row.tag}
@@ -165,9 +183,9 @@
                                                     <thead class="bg-gray-100 sticky top-0">
                                                         <tr>
                                                             <th scope="col" class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Seed</th>
-                                                            <th scope="col" class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Score</th>
-                                                            <th scope="col" class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Relative Score</th>
-                                                            <th scope="col" class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Time (s)</th>
+                                                            <th scope="col" class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Score</th>
+                                                            <th scope="col" class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Relative Score</th>
+                                                            <th scope="col" class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Time (s)</th>
                                                             <th scope="col" class="px-4 py-2"></th>
                                                         </tr>
                                                     </thead>
@@ -175,9 +193,9 @@
                                                         {#each row.details.slice().sort((a: any, b: any) => (Number(a.seed) || 0) - (Number(b.seed) || 0)) as detail}
                                                             <tr class="hover:bg-gray-50">
                                                                 <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900 font-mono">{detail.seed}</td>
-                                                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900 font-mono font-medium">{Math.round(Number(detail.score) || 0).toLocaleString()}</td>
-                                                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 font-mono">{detail.relative_score !== undefined ? detail.relative_score : '-'}</td>
-                                                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 font-mono">{detail.execution_time !== undefined ? detail.execution_time : (detail.time !== undefined ? detail.time : '-')}</td>
+                                                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900 font-mono font-medium text-right">{formatScore(Number(detail.score) || 0)}</td>
+                                                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 font-mono text-right whitespace-pre">{detail.relative_score !== undefined ? formatRelative(Number(detail.relative_score)) : '-'}</td>
+                                                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 font-mono text-right">{detail.execution_time !== undefined ? formatTime(Number(detail.execution_time)) : (detail.time !== undefined ? formatTime(Number(detail.time)) : '-')}</td>
                                                                 <td class="px-4 py-2"></td>
                                                             </tr>
                                                         {/each}
