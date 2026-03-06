@@ -9,12 +9,9 @@
     defaultScale: 1.0,
     testRunOptions: {
       shuffle: false,
-      json: false,
       settingFile: 'pahcer_config.toml',
       freezeBestScores: false,
-      noResultFile: false,
-      noCompile: false,
-      extraArgs: ''
+      noCompile: false
     }
   });
 
@@ -37,8 +34,10 @@
         ...globalConfig, 
         ...res.global,
         testRunOptions: {
-          ...globalConfig.testRunOptions,
-          ...(res.global.testRunOptions || {})
+          shuffle: res.global.testRunOptions?.shuffle ?? globalConfig.testRunOptions!.shuffle,
+          settingFile: res.global.testRunOptions?.settingFile ?? globalConfig.testRunOptions!.settingFile,
+          freezeBestScores: res.global.testRunOptions?.freezeBestScores ?? globalConfig.testRunOptions!.freezeBestScores,
+          noCompile: res.global.testRunOptions?.noCompile ?? globalConfig.testRunOptions!.noCompile,
         }
       };
       localConfig = { ...localConfig, ...res.local };
@@ -206,15 +205,6 @@
                             class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-shadow"
                         />
                     </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Default Extra Args</label>
-                        <input
-                            type="text"
-                            bind:value={globalConfig.testRunOptions!.extraArgs}
-                            placeholder="--seed 0-9"
-                            class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-shadow"
-                        />
-                    </div>
                 </div>
                 <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
                     <label class="flex items-center space-x-3 cursor-pointer group">
@@ -222,16 +212,8 @@
                         <span class="text-sm text-gray-600 group-hover:text-gray-900">Shuffle cases</span>
                     </label>
                     <label class="flex items-center space-x-3 cursor-pointer group">
-                        <input type="checkbox" bind:checked={globalConfig.testRunOptions!.json} class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 transition-colors" />
-                        <span class="text-sm text-gray-600 group-hover:text-gray-900">JSON Output</span>
-                    </label>
-                    <label class="flex items-center space-x-3 cursor-pointer group">
                         <input type="checkbox" bind:checked={globalConfig.testRunOptions!.freezeBestScores} class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 transition-colors" />
                         <span class="text-sm text-gray-600 group-hover:text-gray-900">Freeze Best Scores</span>
-                    </label>
-                    <label class="flex items-center space-x-3 cursor-pointer group">
-                        <input type="checkbox" bind:checked={globalConfig.testRunOptions!.noResultFile} class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 transition-colors" />
-                        <span class="text-sm text-gray-600 group-hover:text-gray-900">No Result File</span>
                     </label>
                     <label class="flex items-center space-x-3 cursor-pointer group">
                         <input type="checkbox" bind:checked={globalConfig.testRunOptions!.noCompile} class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 transition-colors" />
