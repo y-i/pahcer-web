@@ -427,6 +427,20 @@ export async function startServer(options: any) {
             const script = `
             <script>
             (async function() {
+                const scrollKey = 'pahcer_v_scroll';
+                const restoreScroll = () => {
+                    const saved = sessionStorage.getItem(scrollKey);
+                    if (saved) {
+                        const { x, y } = JSON.parse(saved);
+                        window.scrollTo(x, y);
+                    }
+                };
+
+                // Save scroll position before unload or periodically
+                window.addEventListener('scroll', () => {
+                    sessionStorage.setItem(scrollKey, JSON.stringify({ x: window.pageXOffset, y: window.pageYOffset }));
+                }, { passive: true });
+
                 try {
                     const params = new URLSearchParams(window.location.search);
                     const outputUrl = params.get('output_url');
@@ -434,15 +448,22 @@ export async function startServer(options: any) {
                         const res = await fetch(outputUrl);
                         if (res.ok) {
                             const text = await res.text();
-                            const inputEl = document.getElementById('input') || document.querySelector('textarea');
-                            if (inputEl) {
-                                inputEl.value = text;
-                                inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-                                inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+                            const el = document.getElementById('output') || 
+                                       document.getElementById('input') || 
+                                       document.querySelector('textarea');
+                            if (el) {
+                                el.value = text;
+                                el.dispatchEvent(new Event('input', { bubbles: true }));
+                                el.dispatchEvent(new Event('change', { bubbles: true }));
+                                // Restore scroll after potential layout changes from input
+                                setTimeout(restoreScroll, 10);
                             }
                         }
                     }
                 } catch(e) { console.error('Failed to inject output:', e); }
+                
+                // Initial restore
+                restoreScroll();
             })();
             </script>
             `;
@@ -479,6 +500,19 @@ export async function startServer(options: any) {
              const script = `
             <script>
             (async function() {
+                const scrollKey = 'pahcer_v_scroll';
+                const restoreScroll = () => {
+                    const saved = sessionStorage.getItem(scrollKey);
+                    if (saved) {
+                        const { x, y } = JSON.parse(saved);
+                        window.scrollTo(x, y);
+                    }
+                };
+
+                window.addEventListener('scroll', () => {
+                    sessionStorage.setItem(scrollKey, JSON.stringify({ x: window.pageXOffset, y: window.pageYOffset }));
+                }, { passive: true });
+
                 try {
                     const params = new URLSearchParams(window.location.search);
                     const outputUrl = params.get('output_url');
@@ -486,15 +520,20 @@ export async function startServer(options: any) {
                         const res = await fetch(outputUrl);
                         if (res.ok) {
                             const text = await res.text();
-                            const inputEl = document.getElementById('input') || document.querySelector('textarea');
-                            if (inputEl) {
-                                inputEl.value = text;
-                                inputEl.dispatchEvent(new Event('input', { bubbles: true }));
-                                inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+                            const el = document.getElementById('output') || 
+                                       document.getElementById('input') || 
+                                       document.querySelector('textarea');
+                            if (el) {
+                                el.value = text;
+                                el.dispatchEvent(new Event('input', { bubbles: true }));
+                                el.dispatchEvent(new Event('change', { bubbles: true }));
+                                setTimeout(restoreScroll, 10);
                             }
                         }
                     }
                 } catch(e) { console.error('Failed to inject output:', e); }
+                
+                restoreScroll();
             })();
             </script>
             `;

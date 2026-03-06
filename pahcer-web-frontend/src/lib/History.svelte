@@ -61,11 +61,10 @@
 
   function updateVisualizer() {
     if (!selectedRow) return;
-    const scale = scalePercent / 100;
     // Assume 4-digit zero-padded filename for now as per standard tools
     const filename = String(seed).padStart(4, '0') + '.txt';
     const outputUrl = encodeURIComponent(`/api/history/${selectedRow.id}/output/${filename}`);
-    iframeSrc = `${visualizerUrl}?output_url=${outputUrl}&seed=${seed}&scale=${scale}`;
+    iframeSrc = `${visualizerUrl}?output_url=${outputUrl}&seed=${seed}`;
   }
 
   $effect(() => {
@@ -261,11 +260,12 @@
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
             </div>
-            <div class="flex-1 relative bg-gray-50 min-w-0">
+            <div class="flex-1 relative bg-gray-50 min-w-0 overflow-hidden">
                 <iframe 
                     title="Visualizer"
                     src={iframeSrc} 
-                    class="w-full h-full border-none"
+                    class="border-none"
+                    style="width: {10000 / scalePercent}%; height: {10000 / scalePercent}%; transform: scale({scalePercent / 100}); transform-origin: 0 0;"
                 ></iframe>
             </div>
         {/if}
