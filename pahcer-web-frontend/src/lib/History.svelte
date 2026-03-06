@@ -19,33 +19,80 @@
   // Visualizer controls
   let seed = $state(0);
   let scalePercent = $state(100);
-  let iframeSrc = $state('');
-
-  onMount(async () => {
-    try {
-      const [historyRes, configRes] = await Promise.all([
-        api.getHistory(),
-        api.getConfig()
-      ]);
-      historyData = historyRes;
-      config = configRes.global;
-
-      seed = config.defaultSeed;
-      scalePercent = Math.round(config.defaultScale * 100);
-    } catch (e) {
-      error = 'Failed to load data';
-      console.error(e);
-    } finally {
-      isLoading = false;
-    }
+  
+  // Derived iframeSrc
+  let iframeSrc = $derived.by(() => {
+    if (!selectedRow) return '';
+    const filename = String(seed).padStart(4, '0') + '.txt';
+    const outputUrl = encodeURIComponent(`/api/history/${selectedRow.id}/output/${filename}`);
+    return `${visualizerUrl}?output_url=${outputUrl}&seed=${seed}`;
   });
+
+  let isUpdatingFromHistory = false;
+
+  onMount(() => {
+    window.addEventListener('popstate', handlePopState);
+    
+    (async () => {
+      try {
+        const [historyRes, configRes] = await Promise.all([
+          api.getHistory(),
+          api.getConfig()
+        ]);
+        historyData = historyRes;
+        config = configRes.global;
+
+        seed = config.defaultSeed;
+        scalePercent = Math.round(config.defaultScale * 100);
+
+        // Initial sync from URL
+        handlePopState();
+      } catch (e) {
+        error = 'Failed to load data';
+        console.error(e);
+      } finally {
+        isLoading = false;
+      }
+    })();
+    
+    return () => {
+        window.removeEventListener('popstate', handlePopState);
+    };
+  });
+
+  function handlePopState() {
+      isUpdatingFromHistory = true;
+      const params = new URLSearchParams(window.location.search);
+      const id = params.get('id');
+      
+      if (id) {
+          const row = historyData.find(r => r.id === id);
+          if (row) {
+              selectedRow = row;
+              const seedParam = params.get('seed');
+              if (seedParam) seed = Number(seedParam);
+              const scaleParam = params.get('scale');
+              if (scaleParam) scalePercent = Number(scaleParam);
+          } else {
+              // ID in URL but not in history (maybe deleted?)
+              selectedRow = null;
+          }
+      } else {
+          selectedRow = null;
+      }
+      
+      // Reset flag after a tick to ensure effects triggered by state changes don't overwrite URL immediately
+      setTimeout(() => {
+          isUpdatingFromHistory = false;
+      }, 0);
+  }
 
   function selectRow(row: any) {
     selectedRow = row;
     // Reset to default values from config when opening a new result
     seed = config.defaultSeed;
     scalePercent = Math.round(config.defaultScale * 100);
-    updateVisualizer();
+    // State change will trigger effect to update URL
   }
 
   function toggleDetails(row: any, event: Event) {
@@ -59,18 +106,43 @@
     expandedRows = newSet;
   }
 
-  function updateVisualizer() {
-    if (!selectedRow) return;
-    // Assume 4-digit zero-padded filename for now as per standard tools
-    const filename = String(seed).padStart(4, '0') + '.txt';
-    const outputUrl = encodeURIComponent(`/api/history/${selectedRow.id}/output/${filename}`);
-    iframeSrc = `${visualizerUrl}?output_url=${outputUrl}&seed=${seed}`;
-  }
-
+  // Sync URL when state changes
   $effect(() => {
-    // selectedRow, seed, scalePercent のいずれかが変更されたら更新
-    if (selectedRow) {
-        updateVisualizer();
+    if (isUpdatingFromHistory) return;
+
+    const url = new URL(window.location.href);
+    const currentId = url.searchParams.get('id');
+    const currentSeed = url.searchParams.get('seed');
+    const currentScale = url.searchParams.get('scale');
+
+    // Deselected
+    if (!selectedRow) {
+        if (currentId) {
+            url.searchParams.delete('id');
+            url.searchParams.delete('seed');
+            url.searchParams.delete('scale');
+            history.pushState(null, '', url.toString());
+        }
+        return;
+    }
+
+    // Selected
+    const newId = selectedRow.id;
+    const newSeed = String(seed);
+    const newScale = String(scalePercent);
+
+    if (currentId !== newId) {
+        // Row changed: Push
+        url.searchParams.set('id', newId);
+        url.searchParams.set('seed', newSeed);
+        url.searchParams.set('scale', newScale);
+        history.pushState(null, '', url.toString());
+    } else if (currentSeed !== newSeed || currentScale !== newScale) {
+        // Only params changed: Replace
+        url.searchParams.set('id', newId);
+        url.searchParams.set('seed', newSeed);
+        url.searchParams.set('scale', newScale);
+        history.replaceState(null, '', url.toString());
     }
   });
 
