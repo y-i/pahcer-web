@@ -336,6 +336,7 @@ export async function startServer(options: any) {
         let stats = {
             avgScore: 0,
             avgLogScore: 0,
+            avgRelativeScore: 0,
             maxTime: 0,
             cases: details.length,
             details: details
@@ -347,6 +348,9 @@ export async function startServer(options: any) {
             
             const totalLogScore = details.reduce((sum, r) => sum + Math.log10(Math.max(1, Number(r.score) || 0)), 0);
             stats.avgLogScore = totalLogScore / stats.cases;
+
+            const totalRelativeScore = details.reduce((sum, r) => sum + (Number(r.relative_score) || 0), 0);
+            stats.avgRelativeScore = totalRelativeScore / stats.cases;
 
             stats.maxTime = Math.max(...details.map(r => {
                 // Use execution_time (seconds) * 1000 => ms, or time (unknown unit, assume seconds if small?)

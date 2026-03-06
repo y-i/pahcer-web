@@ -81,7 +81,7 @@
   }
 
   function formatScore(n: number) {
-      return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return Math.round(n).toLocaleString();
   }
 
   function formatRelative(n: number) {
@@ -89,11 +89,11 @@
       const parts = s.split('.');
       // Integer part should be padded to 4 chars
       const intPart = parts[0].padStart(4, ' ');
-      return `${intPart}.${parts[1]}`;
+      return `${intPart}.${parts[1]}%`;
   }
 
   function formatTime(n: number) {
-      return n.toFixed(4);
+      return Math.round(n * 1000).toLocaleString();
   }
 </script>
 
@@ -132,6 +132,7 @@
                         <th scope="col" class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Cases</th>
                         <th scope="col" class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Avg Score</th>
                         <th scope="col" class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Avg Log</th>
+                        <th scope="col" class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Avg Rel</th>
                         <th scope="col" class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Max Time</th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Comment</th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Tag</th>
@@ -160,6 +161,7 @@
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right">{row.cases}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-mono font-medium text-right">{formatScore(row.avgScore)}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right">{row.avgLogScore.toFixed(3)}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right whitespace-pre">{row.avgRelativeScore !== undefined ? formatRelative(row.avgRelativeScore) : '-'}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right">{Math.round(row.maxTime)}ms</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{row.comment || '-'}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -184,7 +186,7 @@
                                                             <th scope="col" class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-24">Seed</th>
                                                             <th scope="col" class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Score</th>
                                                             <th scope="col" class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Relative Score</th>
-                                                            <th scope="col" class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Time (s)</th>
+                                                            <th scope="col" class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Time (ms)</th>
                                                             <th scope="col" class="px-4 py-2"></th>
                                                         </tr>
                                                     </thead>
