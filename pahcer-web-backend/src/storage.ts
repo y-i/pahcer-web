@@ -12,12 +12,9 @@ export const GlobalConfigSchema = z.object({
   defaultScale: z.number().default(1.0),
   testRunOptions: z.object({
     shuffle: z.boolean().default(false),
-    json: z.boolean().default(false),
     settingFile: z.string().default('pahcer_config.toml'),
     freezeBestScores: z.boolean().default(false),
-    noResultFile: z.boolean().default(false),
     noCompile: z.boolean().default(false),
-    extraArgs: z.string().default(''),
   }).optional(),
 });
 

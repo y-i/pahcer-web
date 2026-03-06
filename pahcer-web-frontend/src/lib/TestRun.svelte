@@ -6,13 +6,10 @@
   let options = $state({
     shuffle: false,
     comment: '',
-    json: false,
     tag: '',
     settingFile: 'pahcer_config.toml',
     freezeBestScores: false,
-    noResultFile: false,
-    noCompile: false,
-    extraArgs: ''
+    noCompile: false
   });
 
   let globalConfig = $state<GlobalConfig | null>(null);
@@ -67,18 +64,13 @@
     const args: string[] = [];
     if (options.shuffle) args.push('--shuffle');
     if (options.comment) args.push('-c', options.comment);
-    if (options.json) args.push('-j');
     if (options.tag) args.push('-t', options.tag);
     if (options.settingFile && options.settingFile !== 'pahcer_config.toml') {
       args.push('--setting-file', options.settingFile);
     }
     if (options.freezeBestScores) args.push('--freeze-best-scores');
-    if (options.noResultFile) args.push('--no-result-file');
     if (options.noCompile) args.push('--no-compile');
     
-    if (options.extraArgs) {
-      args.push(...options.extraArgs.split(/\s+/).filter(a => a.length > 0));
-    }
     return args;
   }
 
@@ -253,26 +245,6 @@
 
             </div>
 
-             <div>
-
-                <label class="block text-xs font-semibold text-gray-600 mb-1" for="extra">Extra Args</label>
-
-                <input
-
-                    id="extra"
-
-                    type="text"
-
-                    bind:value={options.extraArgs}
-
-                    placeholder="--seed 0-9"
-
-                    class="block w-full px-3 py-2 bg-gray-50 border border-gray-300 rounded-lg text-sm shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 focus:bg-white transition-all outline-none"
-
-                />
-
-            </div>
-
         </div>
 
 
@@ -291,25 +263,9 @@
 
             <label class="flex items-center space-x-3 cursor-pointer group">
 
-                <input type="checkbox" bind:checked={options.json} class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 transition-colors" />
-
-                <span class="text-sm text-gray-600 group-hover:text-gray-900 font-medium">JSON Output</span>
-
-            </label>
-
-            <label class="flex items-center space-x-3 cursor-pointer group">
-
                 <input type="checkbox" bind:checked={options.freezeBestScores} class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 transition-colors" />
 
                 <span class="text-sm text-gray-600 group-hover:text-gray-900 font-medium">Freeze Best Scores</span>
-
-            </label>
-
-             <label class="flex items-center space-x-3 cursor-pointer group">
-
-                <input type="checkbox" bind:checked={options.noResultFile} class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 transition-colors" />
-
-                <span class="text-sm text-gray-600 group-hover:text-gray-900 font-medium">No Result File</span>
 
             </label>
 
