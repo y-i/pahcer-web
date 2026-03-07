@@ -2,11 +2,10 @@
   import { onMount } from 'svelte';
   import { api, type GlobalConfig } from './api';
 
-  let listData = $state<Record<string, string>[]>([]);
-  let rawOutput = $state('');
+  let historyData = $state<any[]>([]);
   let isLoading = $state(true);
   let error = $state('');
-  let selectedRow = $state<Record<string, string> | null>(null);
+  let selectedRow = $state<any | null>(null);
 
   let visualizerUrl = $state('/visualizer/index.html');
   let config = $state<GlobalConfig>({
@@ -23,12 +22,11 @@
 
   onMount(async () => {
     try {
-      const [listRes, configRes] = await Promise.all([
-        api.getList(),
+      const [historyRes, configRes] = await Promise.all([
+        api.getHistory(),
         api.getConfig()
       ]);
-      listData = listRes.parsed;
-      rawOutput = listRes.raw;
+      historyData = historyRes;
       config = configRes.global;
 
       seed = config.defaultSeed;
@@ -41,7 +39,7 @@
     }
   });
 
-  function selectRow(row: Record<string, string>) {
+  function selectRow(row: any) {
     selectedRow = row;
     // Reset to default values from config when opening a new result
     seed = config.defaultSeed;
@@ -52,7 +50,10 @@
   function updateVisualizer() {
     if (!selectedRow) return;
     const scale = scalePercent / 100;
-    iframeSrc = `${visualizerUrl}?seed=${seed}&scale=${scale}`;
+    // Assume 4-digit zero-padded filename for now as per standard tools
+    const filename = String(seed).padStart(4, '0') + '.txt';
+    const outputUrl = encodeURIComponent(`/api/history/${selectedRow.id}/output/${filename}`);
+    iframeSrc = `${visualizerUrl}?output_url=${outputUrl}&seed=${seed}&scale=${scale}`;
   }
 
   $effect(() => {
@@ -61,6 +62,10 @@
         updateVisualizer();
     }
   });
+
+  function formatDate(iso: string) {
+      return new Date(iso).toLocaleString();
+  }
 </script>
 
 <div class="h-full flex flex-col bg-gray-50 overflow-hidden">
@@ -83,7 +88,7 @@
         <div class="px-6 py-4 border-b border-gray-200 bg-white flex justify-between items-center flex-shrink-0 z-10">
             <h2 class="text-lg font-bold text-gray-900 tracking-tight">Execution History</h2>
             <button 
-                onclick={() => api.getList().then(res => listData = res.parsed)} 
+                onclick={() => api.getHistory().then(res => historyData = res)} 
                 class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
             >
                 Refresh
@@ -93,31 +98,41 @@
             <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50 sticky top-0 z-10 shadow-sm">
                     <tr>
-                        {#if listData.length > 0}
-                            {#each Object.keys(listData[0]) as key}
-                                <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">
-                                    {key}
-                                </th>
-                            {/each}
-                        {:else}
-                            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                        {/if}
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Date</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Cases</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Avg Score</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Avg Log</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Max Time</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Comment</th>
+                        <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Tag</th>
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-200">
-                    {#each listData as row, i}
+                    {#each historyData as row}
                         <tr 
                             class="group hover:bg-indigo-50/50 cursor-pointer transition-colors duration-150 ease-in-out {selectedRow === row ? 'bg-indigo-50' : ''}"
                             onclick={() => selectRow(row)}
                         >
-                            {#each Object.values(row) as val}
-                                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 group-hover:text-gray-900 font-mono">{val}</td>
-                            {/each}
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono">{formatDate(row.datetime)}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono">{row.cases}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-mono font-medium">{Math.round(row.avgScore).toLocaleString()}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono">{row.avgLogScore.toFixed(3)}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono">{Math.round(row.maxTime)}ms</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{row.comment || '-'}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                {#if row.tag}
+                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                        {row.tag}
+                                    </span>
+                                {:else}
+                                    -
+                                {/if}
+                            </td>
                         </tr>
                     {/each}
                 </tbody>
             </table>
-            {#if listData.length === 0}
+            {#if historyData.length === 0}
                 <div class="flex flex-col items-center justify-center p-12 text-center">
                     <div class="rounded-full bg-gray-100 p-3 mb-4">
                         <svg class="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -125,18 +140,11 @@
                         </svg>
                     </div>
                     <h3 class="text-sm font-medium text-gray-900">No history found</h3>
-                    <p class="mt-1 text-sm text-gray-500">Run <code>pahcer list</code> or use the Test Run tab to generate results.</p>
-                    {#if rawOutput}
-                        <div class="mt-6 w-full max-w-lg">
-                            <p class="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">Raw Output</p>
-                            <pre class="text-xs text-left bg-gray-50 p-4 rounded-lg border border-gray-200 overflow-x-auto text-gray-600">{rawOutput}</pre>
-                        </div>
-                    {/if}
+                    <p class="mt-1 text-sm text-gray-500">Run a test to generate results.</p>
                 </div>
             {/if}
         </div>
       </div>
-
       <!-- Visualizer View -->
       <div class="{selectedRow ? 'w-[calc(50%-0.75rem)] opacity-100' : 'w-0 opacity-0 border-0 p-0 overflow-hidden'} 
                   {config.visualizerPosition === 'left' ? 'order-1' : 'order-2'}
