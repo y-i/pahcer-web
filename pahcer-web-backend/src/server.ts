@@ -582,33 +582,102 @@ export async function startServer(options: any) {
     });
 
     app.get('/analysis/input.csv', async (c) => {
-        const { parsed: rows } = getPahcerListParsed(baseDir);
-        let csv = 'file,seed\n';
-        for (const row of rows) {
-            const file = row['Case'];
-            if (file) {
-                const seedMatch = file.match(/(\d+)/);
-                const seed = seedMatch ? parseInt(seedMatch[1], 10) : 0;
-                csv += `${file},${seed}\n`;
+        const inputFiles = new Set<string>();
+        const seedMap = new Map<string, string>();
+
+        // Collect from results
+        const resultsDir = storage.getResultsDir();
+        try {
+            const dirs = await readdir(resultsDir);
+            for (const dir of dirs) {
+                try {
+                    const resultPath = join(resultsDir, dir, 'result.json');
+                    const content = await readFile(resultPath, 'utf-8');
+                    const result = JSON.parse(content);
+                    if (result.details && Array.isArray(result.details)) {
+                        for (const d of result.details) {
+                            if (d.seed !== undefined) {
+                                inputFiles.add(String(d.seed));
+                            }
+                        }
+                    }
+                } catch {}
             }
+        } catch {}
+
+        // Collect from tools/in
+        try {
+            const inDir = join(baseDir, 'tools', 'in');
+            if (existsSync(inDir)) {
+                const files = await readdir(inDir);
+                for (const file of files) {
+                    if (file.endsWith('.txt')) {
+                        const seed = file.replace('.txt', '');
+                        // Simple numeric check or just use filename as seed source
+                        inputFiles.add(seed);
+                    }
+                }
+            }
+        } catch {}
+
+        let csv = 'file,seed\n';
+        // Sort numerically if possible
+        const sortedSeeds = Array.from(inputFiles).sort((a, b) => {
+            const na = Number(a);
+            const nb = Number(b);
+            return !isNaN(na) && !isNaN(nb) ? na - nb : a.localeCompare(b);
+        });
+
+        for (const s of sortedSeeds) {
+            // Assume 0000.txt format for file column as per standard pahcer convention, 
+            // but if seed is not numeric, just use seed.txt
+            const isNumeric = !isNaN(Number(s));
+            const filename = isNumeric ? String(s).padStart(4, '0') + '.txt' : `${s}.txt`;
+            csv += `${filename},${s}\n`;
         }
         return c.text(csv);
     });
 
     app.get('/analysis/result.csv', async (c) => {
-        const { parsed: rows } = getPahcerListParsed(baseDir);
         let csv = 'author,file,score\n';
-        const author = 'Current'; 
-        for (const row of rows) {
-            const file = row['Case'];
-            const scoreStr = row['Score'];
-            if (file && scoreStr) {
-                const score = parseInt(scoreStr.replace(/,/g, ''), 10) || 0;
-                csv += `${author},${file},${score}\n`;
+        const resultsDir = storage.getResultsDir();
+        try {
+            const dirs = await readdir(resultsDir);
+            for (const dir of dirs) {
+                try {
+                    const resultPath = join(resultsDir, dir, 'result.json');
+                    const content = await readFile(resultPath, 'utf-8');
+                    const result = JSON.parse(content);
+                    
+                    // Determine Author Name
+                    let author = result.tag || result.comment;
+                    if (!author) {
+                        const date = new Date(result.datetime);
+                        author = date.toLocaleString(); // Use simplified date as fallback
+                    } else {
+                        // Append short timestamp to ensure uniqueness if needed, or just trust tag
+                        // author = `${author} (${dir})`; 
+                    }
+                    // Sanitize author name for CSV
+                    author = author.replace(/,/g, ' ').replace(/"/g, '').trim();
+
+                    if (result.details && Array.isArray(result.details)) {
+                        for (const d of result.details) {
+                            if (d.seed !== undefined && d.score !== undefined) {
+                                const s = String(d.seed);
+                                const isNumeric = !isNaN(Number(s));
+                                const filename = isNumeric ? String(s).padStart(4, '0') + '.txt' : `${s}.txt`;
+                                csv += `${author},${filename},${d.score}\n`;
+                            }
+                        }
+                    }
+                } catch {}
             }
-        }
+        } catch {}
         return c.text(csv);
     });
+
+    app.get('/analysis/*', (c) => c.text('Not Found', 404));
 
     // Static files
     const relativeDistDir = relative(process.cwd(), distDir);
