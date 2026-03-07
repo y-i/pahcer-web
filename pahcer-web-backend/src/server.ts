@@ -369,44 +369,55 @@ export async function startServer(options: any) {
              }
         }
 
-        // Copy output files
-        // Assume tools/out/*.txt
-        const toolsOutDir = join(baseDir, 'tools', 'out');
-        try {
-            if (existsSync(toolsOutDir)) {
-                const files = await readdir(toolsOutDir);
-                for (const file of files) {
-                    if (file.endsWith('.txt')) {
-                        await copyFile(join(toolsOutDir, file), join(outputDir, file));
+        if (stats.cases > 0) {
+            // Copy output files
+            // Assume tools/out/*.txt
+            const toolsOutDir = join(baseDir, 'tools', 'out');
+            try {
+                if (existsSync(toolsOutDir)) {
+                    const files = await readdir(toolsOutDir);
+                    for (const file of files) {
+                        if (file.endsWith('.txt')) {
+                            await copyFile(join(toolsOutDir, file), join(outputDir, file));
+                        }
                     }
                 }
+            } catch (e) {
+                console.error('Failed to copy output files', e);
             }
-        } catch (e) {
-            console.error('Failed to copy output files', e);
+
+            // Save result.json
+            const resultJson = {
+                id: timestamp,
+                datetime: new Date().toISOString(),
+                args,
+                comment,
+                tag,
+                ...stats
+            };
+            await writeFile(join(resultDir, 'result.json'), JSON.stringify(resultJson, null, 2));
+
+            await storage.saveJob({
+              id: jobId,
+              datetime: new Date().toISOString(),
+              command: 'run',
+              args,
+              status: exitCode === 0 ? 'success' : 'failed',
+              result: {
+                score: stats.avgScore,
+                logs: allOutput
+              }
+            });
+        } else {
+            // Cleanup empty result directory if no cases were executed
+            try {
+                await rm(resultDir, { recursive: true, force: true });
+            } catch (e) {
+                console.error('Failed to cleanup empty result dir', e);
+            }
+            // Remove the job entry as well
+            await storage.deleteJob(jobId);
         }
-
-        // Save result.json
-        const resultJson = {
-            id: timestamp,
-            datetime: new Date().toISOString(),
-            args,
-            comment,
-            tag,
-            ...stats
-        };
-        await writeFile(join(resultDir, 'result.json'), JSON.stringify(resultJson, null, 2));
-
-        await storage.saveJob({
-          id: jobId,
-          datetime: new Date().toISOString(),
-          command: 'run',
-          args,
-          status: exitCode === 0 ? 'success' : 'failed',
-          result: {
-            score: stats.avgScore,
-            logs: allOutput
-          }
-        });
 
         stream.write(JSON.stringify({ type: 'exit', code: exitCode }) + '\n');
       });

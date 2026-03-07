@@ -113,6 +113,15 @@ export class Storage {
     await writeFile(this.getJobsPath(), JSON.stringify(jobs, null, 2));
   }
 
+  async deleteJob(id: string): Promise<void> {
+    const jobs = await this.getJobs();
+    const newJobs = jobs.filter(j => j.id !== id);
+    if (newJobs.length !== jobs.length) {
+      await mkdir(join(this.baseDir, this.localDir), { recursive: true });
+      await writeFile(this.getJobsPath(), JSON.stringify(newJobs, null, 2));
+    }
+  }
+
   // Visualizer
   getVisualizerDir(): string {
     return join(this.baseDir, this.localDir, 'visualizer');
