@@ -80,6 +80,11 @@ export const api = {
     return res.json();
   },
 
+  async getHistory(): Promise<any[]> {
+    const res = await fetch('/api/history');
+    return res.json();
+  },
+
   async runPahcer(args: string[], onData: (data: any) => void): Promise<void> {
     const res = await fetch('/api/run', {
       method: 'POST',
