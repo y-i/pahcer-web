@@ -7,7 +7,8 @@ import { spawn, execSync } from 'node:child_process';
 
 import { Storage, type GlobalConfig, type LocalConfig } from './storage.js';
 import { streamText } from 'hono/streaming';
-import { writeFile, readFile, mkdir, rm } from 'node:fs/promises';
+import { writeFile, readFile, mkdir, rm, readdir, stat, copyFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 
 function getPahcerListParsed(baseDir: string) {
     try {
@@ -149,6 +150,41 @@ export async function startServer(options: any) {
       return c.json(jobs);
     });
 
+    // History
+    api.get('/history', async (c) => {
+        const resultsDir = storage.getResultsDir();
+        try {
+            const dirs = await readdir(resultsDir);
+            const results = [];
+            for (const dir of dirs) {
+                try {
+                    const resultPath = join(resultsDir, dir, 'result.json');
+                    const content = await readFile(resultPath, 'utf-8');
+                    results.push(JSON.parse(content));
+                } catch (e) {
+                    // ignore invalid/incomplete results
+                }
+            }
+            // Sort by datetime desc
+            results.sort((a, b) => new Date(b.datetime).getTime() - new Date(a.datetime).getTime());
+            return c.json(results);
+        } catch (e) {
+            return c.json([]);
+        }
+    });
+
+    api.get('/history/:timestamp/output/:filename', async (c) => {
+        const timestamp = c.req.param('timestamp');
+        const filename = c.req.param('filename');
+        const filePath = join(storage.getResultsDir(), timestamp, 'output', filename);
+        try {
+            const content = await readFile(filePath);
+            return c.text(content.toString());
+        } catch {
+            return c.text('Not Found', 404);
+        }
+    });
+
     // Visualizer
     api.get('/visualizer/status', async (c) => {
         const exists = await storage.hasVisualizer();
@@ -189,8 +225,39 @@ export async function startServer(options: any) {
     // Run pahcer
     api.post('/run', async (c) => {
       const body = await c.req.json();
-      const args = body.args || [];
+      let args: string[] = body.args || [];
       
+      // Force --json
+      if (!args.includes('--json') && !args.includes('-j')) {
+        args.push('--json');
+      }
+
+      // Extract metadata
+      let comment = '';
+      let tag = '';
+      for (let i = 0; i < args.length; i++) {
+          if (args[i] === '-c' || args[i] === '--comment') {
+              comment = args[i+1] || '';
+              // Quote the comment for shell execution if it contains spaces and isn't quoted
+              if (args[i+1] && !args[i+1].startsWith('"') && !args[i+1].startsWith("'")) {
+                  args[i+1] = `"${args[i+1]}"`;
+              }
+          }
+          if (args[i] === '-t' || args[i] === '--tag') {
+              tag = args[i+1] || '';
+              // Quote the tag for shell execution if it contains spaces and isn't quoted
+              if (args[i+1] && !args[i+1].startsWith('"') && !args[i+1].startsWith("'")) {
+                  args[i+1] = `"${args[i+1]}"`;
+              }
+          }
+      }
+
+      // Create timestamped directory
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      const resultDir = join(storage.getResultsDir(), timestamp);
+      const outputDir = join(resultDir, 'output');
+      await mkdir(outputDir, { recursive: true });
+
       return streamText(c, async (stream) => {
         const child = spawn('pahcer', ['run', ...args], {
           stdio: ['ignore', 'pipe', 'pipe'],
@@ -201,6 +268,8 @@ export async function startServer(options: any) {
         const jobId = Date.now().toString();
         const fullLogs: string[] = [];
         
+        // Keep jobs.json for now as a running indicator/log storage if needed, 
+        // but result.json is the main storage for history.
         await storage.saveJob({
           id: jobId,
           datetime: new Date().toISOString(),
@@ -226,8 +295,123 @@ export async function startServer(options: any) {
         });
 
         const allOutput = fullLogs.join('');
-        const scoreMatch = allOutput.match(/Score\s*=\s*([\d,]+)/i);
-        const score = scoreMatch ? parseInt(scoreMatch[1].replace(/,/g, '')) : undefined;
+        
+        // Parse JSON output from pahcer
+        let parsedResult: any = null;
+        
+        // Robust JSON extraction: Find the last valid JSON block
+        try {
+            // Find start indices of potential JSON blocks
+            const lastOpenBracket = allOutput.lastIndexOf('[');
+            const lastOpenBrace = allOutput.lastIndexOf('{');
+            const startIdx = Math.max(lastOpenBracket, lastOpenBrace);
+            
+            if (startIdx >= 0) {
+                // Try to find the matching closing character
+                const startChar = allOutput[startIdx];
+                const endChar = startChar === '[' ? ']' : '}';
+                const endIdx = allOutput.lastIndexOf(endChar);
+                
+                if (endIdx > startIdx) {
+                    const candidate = allOutput.substring(startIdx, endIdx + 1);
+                    try {
+                        parsedResult = JSON.parse(candidate);
+                    } catch {
+                        // If strict slice fails, maybe there's some noise, try finding balanced (simple check)
+                        // or just rely on regex fallback if this simple slice failed.
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('Failed to parse pahcer JSON output', e);
+        }
+
+        // Default stats if parsing fails
+        let stats = {
+            avgScore: 0,
+            avgLogScore: 0,
+            maxTime: 0,
+            cases: 0,
+            details: [] as any[]
+        };
+
+        if (Array.isArray(parsedResult)) {
+            // Standard pahcer output: array of result objects
+            stats.details = parsedResult;
+            stats.cases = parsedResult.length;
+            if (stats.cases > 0) {
+                const totalScore = parsedResult.reduce((sum, r) => sum + (r.score || 0), 0);
+                stats.avgScore = totalScore / stats.cases;
+                
+                const totalLogScore = parsedResult.reduce((sum, r) => sum + Math.log10(Math.max(1, r.score || 0)), 0);
+                stats.avgLogScore = totalLogScore / stats.cases;
+
+                stats.maxTime = Math.max(...parsedResult.map(r => r.time || 0));
+            }
+        } else if (parsedResult && typeof parsedResult === 'object') {
+             // Handle potential object wrapper (e.g. { results: [...] })
+             // Check if it has a 'results' or similar array, or if it is a single result
+             const list = Array.isArray(parsedResult.results) ? parsedResult.results : 
+                          Array.isArray(parsedResult.cases) ? parsedResult.cases : null;
+             
+             if (list) {
+                 stats.details = list;
+                 stats.cases = list.length;
+                 if (stats.cases > 0) {
+                    const totalScore = list.reduce((sum: number, r: any) => sum + (r.score || 0), 0);
+                    stats.avgScore = totalScore / stats.cases;
+                    const totalLogScore = list.reduce((sum: number, r: any) => sum + Math.log10(Math.max(1, r.score || 0)), 0);
+                    stats.avgLogScore = totalLogScore / stats.cases;
+                    stats.maxTime = Math.max(...list.map((r: any) => r.time || 0));
+                 }
+             } else if (parsedResult.score !== undefined) {
+                 // Single result object
+                 stats.details = [parsedResult];
+                 stats.cases = 1;
+                 stats.avgScore = parsedResult.score;
+                 stats.avgLogScore = Math.log10(Math.max(1, parsedResult.score));
+                 stats.maxTime = parsedResult.time || 0;
+             }
+        }
+
+        // Fallback to regex extraction if JSON parsing failed or didn't give expected array
+        // (This handles non-JSON output or catastrophic parsing failure)
+        if (stats.cases === 0) {
+             const scoreMatch = allOutput.match(/Score\s*=\s*([\d,]+)/i);
+             const score = scoreMatch ? parseInt(scoreMatch[1].replace(/,/g, '')) : 0;
+             if (score > 0) {
+                 stats.avgScore = score;
+                 stats.avgLogScore = Math.log10(score);
+                 stats.cases = 1; // Treat as single if regex found something
+             }
+        }
+
+        // Copy output files
+        // Assume tools/out/*.txt
+        const toolsOutDir = join(baseDir, 'tools', 'out');
+        try {
+            if (existsSync(toolsOutDir)) {
+                const files = await readdir(toolsOutDir);
+                for (const file of files) {
+                    if (file.endsWith('.txt')) {
+                        await copyFile(join(toolsOutDir, file), join(outputDir, file));
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('Failed to copy output files', e);
+        }
+
+        // Save result.json
+        const resultJson = {
+            id: timestamp,
+            datetime: new Date().toISOString(),
+            args,
+            comment,
+            tag,
+            ...stats
+        };
+        await writeFile(join(resultDir, 'result.json'), JSON.stringify(resultJson, null, 2));
 
         await storage.saveJob({
           id: jobId,
@@ -236,7 +420,7 @@ export async function startServer(options: any) {
           args,
           status: exitCode === 0 ? 'success' : 'failed',
           result: {
-            score,
+            score: stats.avgScore,
             logs: allOutput
           }
         });
@@ -258,12 +442,45 @@ export async function startServer(options: any) {
     app.get('/visualizer/*', async (c) => {
         const relPath = c.req.path.replace('/visualizer/', '') || 'index.html';
         const filePath = join(visualizerDir, relPath);
+        
+        // Helper to inject script
+        const injectScript = (html: string) => {
+            const script = `
+            <script>
+            (async function() {
+                try {
+                    const params = new URLSearchParams(window.location.search);
+                    const outputUrl = params.get('output_url');
+                    if (outputUrl) {
+                        const res = await fetch(outputUrl);
+                        if (res.ok) {
+                            const text = await res.text();
+                            const inputEl = document.getElementById('input') || document.querySelector('textarea');
+                            if (inputEl) {
+                                inputEl.value = text;
+                                inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+                                inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+                            }
+                        }
+                    }
+                } catch(e) { console.error('Failed to inject output:', e); }
+            })();
+            </script>
+            `;
+            return html.replace('</body>', `${script}</body>`);
+        };
+
         try {
             const content = await readFile(filePath);
+            
+            if (relPath.endsWith('.html')) {
+                const html = content.toString();
+                return c.html(injectScript(html));
+            }
+
             const contentType = relPath.endsWith('.js') ? 'application/javascript' : 
                                relPath.endsWith('.css') ? 'text/css' : 
                                relPath.endsWith('.wasm') ? 'application/wasm' :
-                               relPath.endsWith('.html') ? 'text/html' :
                                relPath.endsWith('.png') ? 'image/png' :
                                relPath.endsWith('.jpg') ? 'image/jpeg' :
                                relPath.endsWith('.svg') ? 'image/svg+xml' :
@@ -278,7 +495,33 @@ export async function startServer(options: any) {
         const path = storage.getVisualizerPath();
         try {
             const content = await readFile(path);
-            return c.html(content.toString());
+            let html = content.toString();
+            
+             const script = `
+            <script>
+            (async function() {
+                try {
+                    const params = new URLSearchParams(window.location.search);
+                    const outputUrl = params.get('output_url');
+                    if (outputUrl) {
+                        constHZres = await fetch(outputUrl);
+                        if (res.ok) {
+                            const text = await res.text();
+                            const inputEl = document.getElementById('input') || document.querySelector('textarea');
+                            if (inputEl) {
+                                inputEl.value = text;
+                                inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+                                inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+                            }
+                        }
+                    }
+                } catch(e) { console.error('Failed to inject output:', e); }
+            })();
+            </script>
+            `;
+            html = html.replace('</body>', `${script}</body>`);
+            
+            return c.html(html);
         } catch {
             return c.text('Visualizer not found. Please download it from settings.', 404);
         }

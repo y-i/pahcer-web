@@ -138,4 +138,13 @@ export class Storage {
   getAnalysisPath(): string {
     return join(this.baseDir, this.localDir, 'analysis.html');
   }
+
+  // Results
+  getResultsDir(): string {
+    return join(this.baseDir, this.localDir, 'results');
+  }
+
+  getResultPath(timestamp: string): string {
+    return join(this.getResultsDir(), timestamp, 'result.json');
+  }
 }
