@@ -18,6 +18,7 @@ export interface LocalConfig {
 export interface ConfigResponse {
   global: GlobalConfig;
   local: LocalConfig;
+  problemName?: string;
 }
 
 export interface JobMetadata {

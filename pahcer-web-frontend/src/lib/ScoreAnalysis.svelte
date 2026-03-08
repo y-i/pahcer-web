@@ -6,11 +6,16 @@
   let isLoading = $state(false);
   let isCheckingConfig = $state(true);
   let hasVisualizerUrl = $state(false);
+  let problemName = $state('unknown');
 
   onMount(async () => {
     try {
       const config = await api.getConfig();
       hasVisualizerUrl = !!(config.local.visualizerUrl || config.global.visualizerUrl);
+      if (config.problemName) {
+          problemName = config.problemName;
+          iframeSrc = `/analysis/index.html?contest=${problemName}`;
+      }
     } catch (e) {
       console.error('Failed to load config:', e);
     } finally {
@@ -24,7 +29,7 @@
         await fetch('/api/analysis/download', {
             method: 'POST'
         });
-        iframeSrc = `/analysis/index.html?t=${Date.now()}`;
+        iframeSrc = `/analysis/index.html?contest=${problemName}&t=${Date.now()}`;
     } catch (e) {
         console.error(e);
         alert('Failed to reload analysis tool.');
