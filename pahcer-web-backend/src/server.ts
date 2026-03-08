@@ -31,6 +31,25 @@ function getPahcerListParsed(baseDir: string) {
     }
 }
 
+async function getSeeds(baseDir: string): Promise<string[]> {
+    const seedsPath = join(baseDir, 'tools', 'seeds.txt');
+    const inDir = join(baseDir, 'tools', 'in');
+    
+    try {
+        if (existsSync(seedsPath)) {
+            const content = await readFile(seedsPath, 'utf-8');
+            return content.trim().split('\n').map(s => s.trim()).filter(Boolean);
+        } else if (existsSync(inDir)) {
+            const files = await readdir(inDir);
+            const numericFiles = files
+                .filter(f => f.endsWith('.txt') && !isNaN(Number(f.replace('.txt', ''))))
+                .sort((a, b) => Number(a.replace('.txt', '')) - Number(b.replace('.txt', '')));
+            return numericFiles.map(f => Number(f.replace('.txt', '')).toString());
+        }
+    } catch {}
+    return [];
+}
+
 async function downloadRecursive(url: string, destDir: string) {
     const visited = new Set<string>();
     const queue: { url: string; relPath: string }[] = [{ url, relPath: 'index.html' }];
@@ -597,56 +616,32 @@ export async function startServer(options: any) {
     });
 
     app.get('/analysis/:contest/input.csv', async (c) => {
-        const seedsPath = join(baseDir, 'tools', 'seeds.txt');
+        const seeds = await getSeeds(baseDir);
         const inDir = join(baseDir, 'tools', 'in');
-        
-        let seeds: string[] = [];
-        try {
-            if (existsSync(seedsPath)) {
-                const content = await readFile(seedsPath, 'utf-8');
-                seeds = content.trim().split('\n').map(s => s.trim()).filter(Boolean);
-            } else if (existsSync(inDir)) {
-                // Fallback: list tools/in if seeds.txt missing
-                const files = await readdir(inDir);
-                const numericFiles = files
-                    .filter(f => f.endsWith('.txt') && !isNaN(Number(f.replace('.txt', ''))))
-                    .sort((a, b) => Number(a.replace('.txt', '')) - Number(b.replace('.txt', '')));
-                
-                // If we can't map index to seed properly without seeds.txt, we assume seed=index?
-                // Or just list them. But Requirement 1 says "line 1 is 0000.txt, value is seed".
-                // If seeds.txt is missing, we can't fully support the requirement.
-                // We'll fallback to just listing file,seed (where seed=filename number) and input params.
-                seeds = numericFiles.map(f => Number(f.replace('.txt', '')).toString());
-            }
-        } catch {
+
+        if (seeds.length === 0) {
             return c.text('file,seed\n');
         }
 
         // Determine columns from first file
         let paramNames: string[] = [];
-        if (seeds.length > 0) {
-            try {
-                // Try 0000.txt first
-                const firstFile = '0000.txt'; 
-                // Or if we fell back, seeds[0] might correspond to 0000.txt
-                // Requirement: line 0 -> 0000.txt
-                const filePath = join(inDir, firstFile);
-                if (existsSync(filePath)) {
-                    const content = await readFile(filePath, 'utf-8');
-                    const firstLine = content.split('\n')[0].trim();
-                    const params = firstLine.split(/\s+/);
-                    // Generate names N, M, L, K... or p_X
-                    const defaultNames = ['N', 'M', 'L', 'K', 'T', 'S'];
-                    paramNames = params.map((_, i) => defaultNames[i] || `p_${i}`);
-                }
-            } catch {}
-        }
+        try {
+            // Try 0000.txt first
+            const firstFile = '0000.txt'; 
+            const filePath = join(inDir, firstFile);
+            if (existsSync(filePath)) {
+                const content = await readFile(filePath, 'utf-8');
+                const firstLine = content.split('\n')[0].trim();
+                const params = firstLine.split(/\s+/);
+                const defaultNames = ['N', 'M', 'L', 'K', 'T', 'S'];
+                paramNames = params.map((_, i) => defaultNames[i] || `p_${i}`);
+            }
+        } catch {}
 
         let csv = `file,seed,${paramNames.join(',')}\n`;
 
         for (let i = 0; i < seeds.length; i++) {
             const seed = seeds[i];
-            // File mapping: index -> 0000.txt
             const filename = String(i).padStart(4, '0') + '.txt';
             const filePath = join(inDir, filename);
             
@@ -659,12 +654,8 @@ export async function startServer(options: any) {
                 }
             } catch {}
 
-            // Ensure we have correct number of commas if file read failed or empty
             if (!paramsPart && paramNames.length > 0) {
                 paramsPart = new Array(paramNames.length).fill('').join(',');
-            } else if (paramsPart) {
-                 // Truncate or pad if counts mismatch? 
-                 // Usually inputs are consistent. We'll just append what we found.
             }
 
             csv += `${filename},${seed}${paramsPart ? ',' + paramsPart : ''}\n`;
@@ -674,7 +665,16 @@ export async function startServer(options: any) {
     });
 
     app.get('/analysis/:contest/result.csv', async (c) => {
-        let csv = 'author,file,score\n';
+        const seeds = await getSeeds(baseDir);
+        
+        // 2. Header
+        const config = await storage.getGlobalConfig();
+        const localConfig = await storage.getLocalConfig();
+        const visualizerUrl = localConfig.visualizerUrl || config.visualizerUrl || '';
+        
+        let csv = `raw,1000000000,${visualizerUrl}\n`;
+
+        // 3. Rows
         const resultsDir = storage.getResultsDir();
         try {
             const dirs = await readdir(resultsDir);
@@ -684,28 +684,27 @@ export async function startServer(options: any) {
                     const content = await readFile(resultPath, 'utf-8');
                     const result = JSON.parse(content);
                     
-                    // Determine Author Name
                     let author = result.tag || result.comment;
                     if (!author) {
                         const date = new Date(result.datetime);
-                        author = date.toLocaleString(); // Use simplified date as fallback
-                    } else {
-                        // Append short timestamp to ensure uniqueness if needed, or just trust tag
-                        // author = `${author} (${dir})`; 
+                        author = date.toLocaleString(); 
                     }
-                    // Sanitize author name for CSV
+                    // Sanitize
                     author = author.replace(/,/g, ' ').replace(/"/g, '').trim();
 
+                    // Create score map
+                    const scoreMap = new Map<string, number>();
                     if (result.details && Array.isArray(result.details)) {
                         for (const d of result.details) {
-                            if (d.seed !== undefined && d.score !== undefined) {
-                                const s = String(d.seed);
-                                const isNumeric = !isNaN(Number(s));
-                                const filename = isNumeric ? String(s).padStart(4, '0') + '.txt' : `${s}.txt`;
-                                csv += `${author},${filename},${d.score}\n`;
+                            if (d.seed !== undefined) {
+                                scoreMap.set(String(d.seed), Number(d.score));
                             }
                         }
                     }
+
+                    // Generate row
+                    const scores = seeds.map(s => scoreMap.has(s) ? scoreMap.get(s) : -1);
+                    csv += `${author},${scores.join(',')}\n`;
                 } catch {}
             }
         } catch {}
