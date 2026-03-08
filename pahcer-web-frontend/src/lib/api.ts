@@ -83,6 +83,16 @@ export const api = {
     return res.json();
   },
 
+  async deleteHistory(timestamp: string): Promise<void> {
+    const res = await fetch(`/api/history/${timestamp}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to delete history');
+    }
+  },
+
   async runPahcer(args: string[], onData: (data: any) => void): Promise<void> {
     const res = await fetch('/api/run', {
       method: 'POST',

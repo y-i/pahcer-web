@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { z } from 'zod';
@@ -148,6 +148,11 @@ export class Storage {
   // Results
   getResultsDir(): string {
     return join(this.baseDir, this.localDir, 'results');
+  }
+
+  async deleteResult(timestamp: string): Promise<void> {
+    const path = join(this.getResultsDir(), timestamp);
+    await rm(path, { recursive: true, force: true });
   }
 
   getResultPath(timestamp: string): string {
