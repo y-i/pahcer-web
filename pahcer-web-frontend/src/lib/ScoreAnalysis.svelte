@@ -79,8 +79,8 @@
         </div>
     </div>
   {:else}
-    <div class="flex-1 flex flex-col overflow-hidden p-6 w-full min-h-0">
-        <div class="flex-1 flex flex-col relative bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden min-h-0">
+    <div class="flex-1 flex flex-col overflow-hidden px-6 pb-6 w-full min-h-0">
+        <div class="flex-1 flex flex-col relative bg-white rounded-b-xl shadow-sm border border-gray-200 border-t-0 overflow-hidden min-h-0">
             <div class="absolute top-3 right-4 z-10">
                 <button 
                 onclick={reloadAnalysis}
@@ -93,7 +93,7 @@
             <iframe
             src={iframeSrc}
             title="Score Analysis"
-            class="w-full h-full border-none block"
+            class="flex-1 w-full min-h-0 border-none block self-stretch"
             ></iframe>
         </div>
     </div>
