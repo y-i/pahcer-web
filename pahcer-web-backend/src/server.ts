@@ -219,6 +219,16 @@ export async function startServer(options: any) {
         }
     });
 
+    api.delete('/history/:timestamp', async (c) => {
+        const timestamp = c.req.param('timestamp');
+        try {
+            await storage.deleteResult(timestamp);
+            return c.json({ success: true });
+        } catch (e) {
+            return c.json({ error: String(e) }, 500);
+        }
+    });
+
     // Visualizer
     api.get('/visualizer/status', async (c) => {
         const exists = await storage.hasVisualizer();
