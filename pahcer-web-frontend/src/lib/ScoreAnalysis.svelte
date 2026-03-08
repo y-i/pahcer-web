@@ -44,7 +44,7 @@
   }
 </script>
 
-<div class="h-full flex flex-col bg-gray-50 overflow-hidden">
+<div class="flex-1 h-full flex flex-col bg-gray-50 overflow-hidden min-h-0">
   {#if isCheckingConfig}
     <div class="flex-1 flex items-center justify-center text-gray-500">
         <svg class="animate-spin h-5 w-5 mr-3 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -54,8 +54,8 @@
         <span>Checking configuration...</span>
     </div>
   {:else if !hasVisualizerUrl}
-    <div class="flex-1 flex overflow-hidden p-6 w-full">
-        <div class="flex-1 flex flex-col items-center justify-center bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+    <div class="flex-1 flex overflow-hidden p-6 w-full min-h-0">
+        <div class="flex-1 flex flex-col items-center justify-center bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center min-h-0">
             <div class="rounded-full bg-amber-100 p-4 mb-6">
                 <svg class="h-10 w-10 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -79,8 +79,8 @@
         </div>
     </div>
   {:else}
-    <div class="flex-1 flex overflow-hidden p-6 w-full">
-        <div class="max-w-none w-full flex-1 flex flex-col relative bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+    <div class="flex-1 flex flex-col overflow-hidden p-6 w-full min-h-0">
+        <div class="flex-1 flex flex-col relative bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden min-h-0">
             <div class="absolute top-3 right-4 z-10">
                 <button 
                 onclick={reloadAnalysis}
@@ -93,7 +93,7 @@
             <iframe
             src={iframeSrc}
             title="Score Analysis"
-            class="w-full h-full border-none"
+            class="w-full h-full border-none block"
             ></iframe>
         </div>
     </div>
