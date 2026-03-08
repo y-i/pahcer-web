@@ -104,6 +104,21 @@ export async function startServer(options: any) {
     const baseDir = resolve(options.directory || process.cwd());
     const storage = new Storage(baseDir);
 
+    // Read problem_name from pahcer_config.toml
+    let problemName = 'unknown';
+    try {
+        const configPath = join(baseDir, 'pahcer_config.toml');
+        if (existsSync(configPath)) {
+            const content = await readFile(configPath, 'utf-8');
+            const match = content.match(/problem_name\s*=\s*["']([^"']+)["']/);
+            if (match) {
+                problemName = match[1];
+            }
+        }
+    } catch (e) {
+        console.error('Failed to read pahcer_config.toml:', e);
+    }
+
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = dirname(__filename);
     const backendRoot = resolve(__dirname, '..'); 
@@ -129,7 +144,7 @@ export async function startServer(options: any) {
     api.get('/config', async (c) => {
       const global = await storage.getGlobalConfig();
       const local = await storage.getLocalConfig();
-      return c.json({ global, local });
+      return c.json({ global, local, problemName });
     });
 
     api.post('/config/global', async (c) => {
@@ -581,64 +596,84 @@ export async function startServer(options: any) {
         }
     });
 
-    app.get('/analysis/input.csv', async (c) => {
-        const inputFiles = new Set<string>();
-        const seedMap = new Map<string, string>();
-
-        // Collect from results
-        const resultsDir = storage.getResultsDir();
+    app.get('/analysis/:contest/input.csv', async (c) => {
+        const seedsPath = join(baseDir, 'tools', 'seeds.txt');
+        const inDir = join(baseDir, 'tools', 'in');
+        
+        let seeds: string[] = [];
         try {
-            const dirs = await readdir(resultsDir);
-            for (const dir of dirs) {
-                try {
-                    const resultPath = join(resultsDir, dir, 'result.json');
-                    const content = await readFile(resultPath, 'utf-8');
-                    const result = JSON.parse(content);
-                    if (result.details && Array.isArray(result.details)) {
-                        for (const d of result.details) {
-                            if (d.seed !== undefined) {
-                                inputFiles.add(String(d.seed));
-                            }
-                        }
-                    }
-                } catch {}
-            }
-        } catch {}
-
-        // Collect from tools/in
-        try {
-            const inDir = join(baseDir, 'tools', 'in');
-            if (existsSync(inDir)) {
+            if (existsSync(seedsPath)) {
+                const content = await readFile(seedsPath, 'utf-8');
+                seeds = content.trim().split('\n').map(s => s.trim()).filter(Boolean);
+            } else if (existsSync(inDir)) {
+                // Fallback: list tools/in if seeds.txt missing
                 const files = await readdir(inDir);
-                for (const file of files) {
-                    if (file.endsWith('.txt')) {
-                        const seed = file.replace('.txt', '');
-                        // Simple numeric check or just use filename as seed source
-                        inputFiles.add(seed);
-                    }
-                }
+                const numericFiles = files
+                    .filter(f => f.endsWith('.txt') && !isNaN(Number(f.replace('.txt', ''))))
+                    .sort((a, b) => Number(a.replace('.txt', '')) - Number(b.replace('.txt', '')));
+                
+                // If we can't map index to seed properly without seeds.txt, we assume seed=index?
+                // Or just list them. But Requirement 1 says "line 1 is 0000.txt, value is seed".
+                // If seeds.txt is missing, we can't fully support the requirement.
+                // We'll fallback to just listing file,seed (where seed=filename number) and input params.
+                seeds = numericFiles.map(f => Number(f.replace('.txt', '')).toString());
             }
-        } catch {}
-
-        let csv = 'file,seed\n';
-        // Sort numerically if possible
-        const sortedSeeds = Array.from(inputFiles).sort((a, b) => {
-            const na = Number(a);
-            const nb = Number(b);
-            return !isNaN(na) && !isNaN(nb) ? na - nb : a.localeCompare(b);
-        });
-
-        for (const s of sortedSeeds) {
-            // Assume 0000.txt format for file column as per standard pahcer convention, 
-            // but if seed is not numeric, just use seed.txt
-            const isNumeric = !isNaN(Number(s));
-            const filename = isNumeric ? String(s).padStart(4, '0') + '.txt' : `${s}.txt`;
-            csv += `${filename},${s}\n`;
+        } catch {
+            return c.text('file,seed\n');
         }
+
+        // Determine columns from first file
+        let paramNames: string[] = [];
+        if (seeds.length > 0) {
+            try {
+                // Try 0000.txt first
+                const firstFile = '0000.txt'; 
+                // Or if we fell back, seeds[0] might correspond to 0000.txt
+                // Requirement: line 0 -> 0000.txt
+                const filePath = join(inDir, firstFile);
+                if (existsSync(filePath)) {
+                    const content = await readFile(filePath, 'utf-8');
+                    const firstLine = content.split('\n')[0].trim();
+                    const params = firstLine.split(/\s+/);
+                    // Generate names N, M, L, K... or p_X
+                    const defaultNames = ['N', 'M', 'L', 'K', 'T', 'S'];
+                    paramNames = params.map((_, i) => defaultNames[i] || `p_${i}`);
+                }
+            } catch {}
+        }
+
+        let csv = `file,seed,${paramNames.join(',')}\n`;
+
+        for (let i = 0; i < seeds.length; i++) {
+            const seed = seeds[i];
+            // File mapping: index -> 0000.txt
+            const filename = String(i).padStart(4, '0') + '.txt';
+            const filePath = join(inDir, filename);
+            
+            let paramsPart = '';
+            try {
+                if (existsSync(filePath)) {
+                    const content = await readFile(filePath, 'utf-8');
+                    const firstLine = content.split('\n')[0].trim();
+                    paramsPart = firstLine.split(/\s+/).join(',');
+                }
+            } catch {}
+
+            // Ensure we have correct number of commas if file read failed or empty
+            if (!paramsPart && paramNames.length > 0) {
+                paramsPart = new Array(paramNames.length).fill('').join(',');
+            } else if (paramsPart) {
+                 // Truncate or pad if counts mismatch? 
+                 // Usually inputs are consistent. We'll just append what we found.
+            }
+
+            csv += `${filename},${seed}${paramsPart ? ',' + paramsPart : ''}\n`;
+        }
+
         return c.text(csv);
     });
 
-    app.get('/analysis/result.csv', async (c) => {
+    app.get('/analysis/:contest/result.csv', async (c) => {
         let csv = 'author,file,score\n';
         const resultsDir = storage.getResultsDir();
         try {
