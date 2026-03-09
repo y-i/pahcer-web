@@ -13,6 +13,8 @@ export interface GlobalConfig {
 
 export interface LocalConfig {
   visualizerUrl?: string;
+  defaultScoreType?: 'raw' | 'max' | 'min' | 'rank_max' | 'rank_min';
+  inputParamNames?: string;
 }
 
 export interface ConfigResponse {

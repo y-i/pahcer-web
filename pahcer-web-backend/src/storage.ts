@@ -22,6 +22,8 @@ export type GlobalConfig = z.infer<typeof GlobalConfigSchema>;
 
 export const LocalConfigSchema = z.object({
   visualizerUrl: z.string().optional(),
+  defaultScoreType: z.enum(['raw', 'max', 'min', 'rank_max', 'rank_min']).optional(),
+  inputParamNames: z.string().optional(),
 });
 
 export type LocalConfig = z.infer<typeof LocalConfigSchema>;
