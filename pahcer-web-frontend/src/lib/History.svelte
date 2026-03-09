@@ -299,6 +299,7 @@
                                                             <th scope="col" class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Score</th>
                                                             <th scope="col" class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Relative Score</th>
                                                             <th scope="col" class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Time (ms)</th>
+                                                            <th scope="col" class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Error</th>
                                                             <th scope="col" class="px-4 py-2"></th>
                                                         </tr>
                                                     </thead>
@@ -309,6 +310,7 @@
                                                                 <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900 font-mono font-medium text-right">{formatScore(Number(detail.score) || 0)}</td>
                                                                 <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 font-mono text-right whitespace-pre">{detail.relative_score !== undefined ? formatRelative(Number(detail.relative_score)) : '-'}</td>
                                                                 <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 font-mono text-right">{detail.execution_time !== undefined ? formatTime(Number(detail.execution_time)) : (detail.time !== undefined ? formatTime(Number(detail.time)) : '-')}</td>
+                                                                <td class="px-4 py-2 text-sm text-red-600 font-mono">{detail.error_message || ''}</td>
                                                                 <td class="px-4 py-2"></td>
                                                             </tr>
                                                         {/each}
