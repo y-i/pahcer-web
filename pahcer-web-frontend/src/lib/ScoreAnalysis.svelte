@@ -7,14 +7,18 @@
   let isCheckingConfig = $state(true);
   let hasVisualizerUrl = $state(false);
   let problemName = $state('unknown');
+  let scoreType = $state<'raw' | 'max' | 'min' | 'rank_max' | 'rank_min' | ''>('');
 
   onMount(async () => {
     try {
       const config = await api.getConfig();
       hasVisualizerUrl = !!(config.local.visualizerUrl || config.global.visualizerUrl);
+      if (config.local.defaultScoreType) {
+          scoreType = config.local.defaultScoreType;
+      }
       if (config.problemName) {
           problemName = config.problemName;
-          iframeSrc = `/analysis/index.html?contest=${problemName}`;
+          updateIframeSrc();
       }
     } catch (e) {
       console.error('Failed to load config:', e);
@@ -23,19 +27,34 @@
     }
   });
 
+  function updateIframeSrc(timestamp?: number) {
+      let src = `/analysis/index.html?contest=${problemName}`;
+      if (timestamp) {
+          src += `&t=${timestamp}`;
+      }
+      if (scoreType) {
+          src += `&score_type=${scoreType}`;
+      }
+      iframeSrc = src;
+  }
+
   async function reloadAnalysis() {
     isLoading = true;
     try {
         await fetch('/api/analysis/download', {
             method: 'POST'
         });
-        iframeSrc = `/analysis/index.html?contest=${problemName}&t=${Date.now()}`;
+        updateIframeSrc(Date.now());
     } catch (e) {
         console.error(e);
         alert('Failed to reload analysis tool.');
     } finally {
         isLoading = false;
     }
+  }
+
+  function handleScoreTypeChange() {
+      updateIframeSrc();
   }
 
   function goToSettings() {
@@ -81,7 +100,20 @@
   {:else}
     <div class="flex-1 flex flex-col overflow-hidden px-6 pb-6 w-full min-h-0">
         <div class="flex-1 flex flex-col relative bg-white rounded-b-xl shadow-sm border border-gray-200 border-t-0 overflow-hidden min-h-0">
-            <div class="absolute top-3 right-4 z-10">
+            <div class="absolute top-3 right-4 z-10 flex items-center space-x-2">
+                <select
+                    bind:value={scoreType}
+                    onchange={handleScoreTypeChange}
+                    class="bg-white/90 hover:bg-white text-gray-700 px-2 py-1.5 rounded-lg shadow-sm text-sm border border-gray-300 transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-50"
+                    disabled={isLoading}
+                >
+                    <option value="">Score Type: Default</option>
+                    <option value="raw">Raw</option>
+                    <option value="max">Relative (YOUR/MAX)</option>
+                    <option value="min">Relative (MIN/YOUR)</option>
+                    <option value="rank_max">Rank (High)</option>
+                    <option value="rank_min">Rank (Low)</option>
+                </select>
                 <button 
                 onclick={reloadAnalysis}
                 class="bg-white/90 hover:bg-white text-gray-700 px-3 py-1.5 rounded-lg shadow-sm text-sm border border-gray-300 transition-all active:scale-95 disabled:opacity-50"

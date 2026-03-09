@@ -252,6 +252,33 @@
               <p class="mt-2 text-xs text-gray-500">The URL of the visualizer for this specific project.</p>
             </div>
 
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Default Score Type</label>
+              <select
+                bind:value={localConfig.defaultScoreType}
+                class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm transition-shadow"
+              >
+                <option value="">Unspecified</option>
+                <option value="raw">Raw Score</option>
+                <option value="max">Relative (YOUR/MAX)</option>
+                <option value="min">Relative (MIN/YOUR)</option>
+                <option value="rank_max">Rank (Higher is Better)</option>
+                <option value="rank_min">Rank (Lower is Better)</option>
+              </select>
+              <p class="mt-2 text-xs text-gray-500">The default score calculation method for the analysis tool.</p>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Input Parameter Names (CSV)</label>
+              <input
+                type="text"
+                bind:value={localConfig.inputParamNames}
+                placeholder="N,M,L,K"
+                class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-shadow"
+              />
+              <p class="mt-2 text-xs text-gray-500">Custom column names for parameters in score analysis (e.g., "N,M,L,K").</p>
+            </div>
+
             <div class="pt-4 border-t border-gray-100 flex justify-end">
               <button
                 onclick={saveLocal}

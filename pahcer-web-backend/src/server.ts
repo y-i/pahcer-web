@@ -633,20 +633,25 @@ export async function startServer(options: any) {
             return c.text('file,seed\n');
         }
 
-        // Determine columns from first file
+        // Determine columns from config or first file
         let paramNames: string[] = [];
-        try {
-            // Try 0000.txt first
-            const firstFile = '0000.txt'; 
-            const filePath = join(inDir, firstFile);
-            if (existsSync(filePath)) {
-                const content = await readFile(filePath, 'utf-8');
-                const firstLine = content.split('\n')[0].trim();
-                const params = firstLine.split(/\s+/);
-                const defaultNames = ['N', 'M', 'L', 'K', 'T', 'S'];
-                paramNames = params.map((_, i) => defaultNames[i] || `p_${i}`);
-            }
-        } catch {}
+        const localConfig = await storage.getLocalConfig();
+        if (localConfig.inputParamNames) {
+            paramNames = localConfig.inputParamNames.split(',').map(s => s.trim()).filter(Boolean);
+        } else {
+            try {
+                // Try 0000.txt first
+                const firstFile = '0000.txt'; 
+                const filePath = join(inDir, firstFile);
+                if (existsSync(filePath)) {
+                    const content = await readFile(filePath, 'utf-8');
+                    const firstLine = content.split('\n')[0].trim();
+                    const params = firstLine.split(/\s+/);
+                    const defaultNames = ['N', 'M', 'L', 'K', 'T', 'S'];
+                    paramNames = params.map((_, i) => defaultNames[i] || `p_${i}`);
+                }
+            } catch {}
+        }
 
         let csv = `file,seed,${paramNames.join(',')}\n`;
 
