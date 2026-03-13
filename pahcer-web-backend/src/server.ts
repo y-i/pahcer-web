@@ -383,6 +383,7 @@ export async function startServer(options: any) {
             avgRelativeScore: 0,
             maxTime: 0,
             cases: details.length,
+            ACcase: 0,
             details: details
         };
 
@@ -395,6 +396,8 @@ export async function startServer(options: any) {
 
             const totalRelativeScore = details.reduce((sum, r) => sum + (Number(r.relative_score) || 0), 0);
             stats.avgRelativeScore = totalRelativeScore / stats.cases;
+
+            stats.ACcase = details.filter(r => (Number(r.score) || 0) > 0 && !r.error_message).length;
 
             stats.maxTime = Math.max(...details.map(r => {
                 // Use execution_time (seconds) * 1000 => ms, or time (unknown unit, assume seconds if small?)
