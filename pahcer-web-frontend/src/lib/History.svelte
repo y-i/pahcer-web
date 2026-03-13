@@ -187,6 +187,16 @@
   function formatTime(n: number) {
       return Math.round(n * 1000).toLocaleString();
   }
+
+  function getACCount(row: any) {
+      if (row.ACcase !== undefined) {
+          return row.ACcase;
+      }
+      if (row.details && Array.isArray(row.details)) {
+          return row.details.filter((r: any) => (Number(r.score) || 0) > 0 && !r.error_message).length;
+      }
+      return 0;
+  }
 </script>
 
 <div class="h-full flex flex-col bg-gray-50 overflow-hidden">
@@ -221,7 +231,7 @@
                     <tr>
                         <th scope="col" class="px-3 py-3 w-8 bg-gray-50"></th>
                         <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Date</th>
-                        <th scope="col" class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Cases</th>
+                        <th scope="col" class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">AC/Cases</th>
                         <th scope="col" class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Avg Score</th>
                         <th scope="col" class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Avg Log</th>
                         <th scope="col" class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap bg-gray-50">Avg Rel</th>
@@ -251,7 +261,7 @@
                                 </button>
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono">{formatDate(row.datetime)}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right">{row.cases}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right">{getACCount(row)}/{row.cases}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-mono font-medium text-right">{formatScore(row.avgScore)}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right">{row.avgLogScore.toFixed(3)}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right whitespace-pre">{row.avgRelativeScore !== undefined ? formatRelative(row.avgRelativeScore) : '-'}</td>
