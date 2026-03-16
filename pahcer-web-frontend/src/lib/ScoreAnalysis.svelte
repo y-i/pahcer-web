@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from './api';
+    import { navigateToTab } from './navigation';
 
   let iframeSrc = $state('/analysis/index.html');
   let isLoading = $state(false);
@@ -58,8 +59,7 @@
   }
 
   function goToSettings() {
-    history.pushState(null, '', '/settings');
-    window.dispatchEvent(new PopStateEvent('popstate'));
+        navigateToTab('settings');
   }
 </script>
 

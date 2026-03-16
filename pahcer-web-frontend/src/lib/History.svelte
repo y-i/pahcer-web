@@ -65,10 +65,14 @@
       isUpdatingFromHistory = true;
       const params = new URLSearchParams(window.location.search);
       const id = params.get('id');
+      const oldId = selectedRow?.id;
       
       if (id) {
           const row = historyData.find(r => r.id === id);
           if (row) {
+              if (row.id !== oldId) {
+                  try { sessionStorage.removeItem('pahcer_v_scroll'); } catch(e) {}
+              }
               selectedRow = row;
               const seedParam = params.get('seed');
               if (seedParam) seed = Number(seedParam);
@@ -89,6 +93,9 @@
   }
 
   function selectRow(row: any) {
+    if (selectedRow?.id !== row.id) {
+        try { sessionStorage.removeItem('pahcer_v_scroll'); } catch(e) {}
+    }
     selectedRow = row;
     // Reset to default values from config when opening a new result
     seed = config.defaultSeed;
@@ -199,7 +206,7 @@
   }
 </script>
 
-<div class="h-full flex flex-col bg-gray-50 overflow-hidden">
+<div class="h-full flex flex-col bg-gray-50 overflow-hidden min-h-0">
   {#if isLoading}
     <div class="flex-1 flex items-center justify-center text-gray-500 space-x-2">
         <svg class="animate-spin h-5 w-5 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -211,11 +218,11 @@
   {:else if error}
     <div class="flex-1 flex items-center justify-center text-red-500">{error}</div>
   {:else}
-    <div class="flex-1 flex overflow-hidden p-6 max-w-none w-full">
+    <div class="flex-1 flex overflow-hidden p-6 max-w-none w-full min-h-0">
       <!-- List View -->
       <div class="{selectedRow ? 'w-[calc(50%-0.75rem)]' : 'w-full'} 
                   {config.visualizerPosition === 'left' ? 'order-2' : 'order-1'} 
-                  flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 z-0">
+                  flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden transition-all duration-300 z-0 min-h-0">
         <div class="px-6 py-4 border-b border-gray-200 bg-white flex justify-between items-center flex-shrink-0 z-10">
             <h2 class="text-lg font-bold text-gray-900 tracking-tight">Execution History</h2>
             <button 
@@ -225,7 +232,7 @@
                 Refresh
             </button>
         </div>
-        <div class="flex-1 overflow-auto">
+        <div class="flex-1 overflow-auto min-h-0">
             <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50 sticky top-0 z-10 shadow-sm">
                     <tr>
@@ -355,22 +362,24 @@
                   {config.visualizerPosition === 'left' ? 'order-1' : 'order-2'}
                   {config.visualizerPosition === 'left' && selectedRow ? 'mr-6' : ''}
                   {config.visualizerPosition === 'right' && selectedRow ? 'ml-6' : ''}
-                  flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden z-20 transition-all duration-300">
+                  flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden z-20 transition-all duration-300 min-h-0">
         {#if selectedRow}
-            <div class="px-4 py-3 border-b border-gray-200 bg-white flex items-center space-x-6 shadow-sm z-10 min-w-0">
+            <div class="px-4 py-3 border-b border-gray-200 bg-white flex items-center space-x-6 shadow-sm z-10 min-w-0 flex-shrink-0">
                 <span class="text-xs font-bold text-gray-400 uppercase tracking-wider flex-shrink-0">Visualizer</span>
                 <div class="h-4 w-px bg-gray-300 flex-shrink-0"></div>
                 <div class="flex items-center space-x-3 min-w-0">
-                    <label class="text-sm font-medium text-gray-600 whitespace-nowrap">Seed</label>
+                    <label class="text-sm font-medium text-gray-600 whitespace-nowrap" for="history-visualizer-seed">Seed</label>
                     <input 
+                        id="history-visualizer-seed"
                         type="number" 
                         bind:value={seed} 
                         class="w-20 px-2 py-1 bg-gray-50 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" 
                     />
                 </div>
                 <div class="flex items-center space-x-3 min-w-0">
-                    <label class="text-sm font-medium text-gray-600 whitespace-nowrap">Scale (%)</label>
+                    <label class="text-sm font-medium text-gray-600 whitespace-nowrap" for="history-visualizer-scale">Scale (%)</label>
                     <input 
+                        id="history-visualizer-scale"
                         type="number" 
                         step="5"
                         bind:value={scalePercent} 
