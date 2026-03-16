@@ -4,6 +4,7 @@
   import History from './lib/History.svelte';
   import ScoreAnalysis from './lib/ScoreAnalysis.svelte';
   import Settings from './lib/Settings.svelte';
+  import { buildTabHref } from './lib/navigation';
 
   const tabs = [
     { id: 'test-run', label: 'テスト実行' },
@@ -34,16 +35,15 @@
     const currentTab = path === '' ? 'test-run' : path;
     
     if (activeTab !== currentTab) {
-      const newPath = activeTab === 'test-run' ? '/' : `/${activeTab}`;
-      history.pushState(null, '', newPath);
+      history.pushState(null, '', buildTabHref(activeTab, window.location));
     }
   });
 </script>
 
-<div class="min-h-screen bg-gray-50 flex flex-col">
+<div class="h-full bg-gray-50 flex flex-col overflow-hidden">
   <Navbar {tabs} bind:activeTab />
 
-  <main class="flex-1 overflow-hidden flex flex-col">
+  <main class="flex-1 min-h-0 overflow-hidden flex flex-col">
     {#if activeTab === 'test-run'}
       <TestRun />
     {:else if activeTab === 'history'}
