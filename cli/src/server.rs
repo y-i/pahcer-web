@@ -31,13 +31,13 @@ use crate::{
     analysis::{download_analysis_html, generate_input_csv, generate_result_csv},
     error::AppError,
     models::{
-        ConfigResponse, JobMetadata, JobStatus, LocalConfig, RunRequest, StoredResult,
-        StreamMessage,
+        ConfigResponse, InitRequest, InitializationState, JobMetadata, JobStatus, LocalConfig,
+        RunRequest, StoredResult, StreamMessage,
     },
     pahcer::{
         collect_details, compute_stats, ensure_json_flag, extract_comment_tag, get_pahcer_list,
     },
-    problem_config::read_problem_name,
+    problem_config::{ProblemConfigState, inspect_problem_config},
     storage::Storage,
     visualizer::{download_recursive, inject_output_loader},
 };
@@ -46,10 +46,10 @@ use crate::{
 pub struct AppState {
     pub base_dir: PathBuf,
     pub storage: Storage,
-    pub problem_name: String,
     pub client: reqwest::Client,
     pub frontend_dist_dir: PathBuf,
     pub pahcer_program: PathBuf,
+    pub init_lock: Arc<Mutex<()>>,
     pub run_lock: Arc<Mutex<()>>,
 }
 
@@ -85,17 +85,16 @@ pub async fn build_state(
     pahcer_program: Option<PathBuf>,
 ) -> Result<AppState, AppError> {
     let storage = Storage::new(base_dir.clone())?;
-    let problem_name = read_problem_name(&base_dir).await?;
 
     Ok(AppState {
         base_dir,
         storage,
-        problem_name,
         client: reqwest::Client::new(),
         frontend_dist_dir,
         pahcer_program: pahcer_program
             .or_else(|| std::env::var_os("PAHCER_WEB_PAHCER_BIN").map(PathBuf::from))
             .unwrap_or_else(|| PathBuf::from("pahcer")),
+        init_lock: Arc::new(Mutex::new(())),
         run_lock: Arc::new(Mutex::new(())),
     })
 }
@@ -107,6 +106,7 @@ pub fn build_app(state: AppState) -> Router {
 
     Router::new()
         .route("/api/config", get(get_config))
+        .route("/api/init", post(run_init))
         .route("/api/config/global", post(save_global_config))
         .route("/api/config/local", post(save_local_config))
         .route("/api/jobs", get(get_jobs))
@@ -134,13 +134,125 @@ pub fn build_app(state: AppState) -> Router {
 }
 
 async fn get_config(State(state): State<AppState>) -> Result<Json<ConfigResponse>, AppError> {
+    Ok(Json(load_config_response(&state).await?))
+}
+
+async fn run_init(
+    State(state): State<AppState>,
+    Json(request): Json<InitRequest>,
+) -> Result<Json<ConfigResponse>, AppError> {
+    let problem = request.problem.trim();
+    if problem.is_empty() {
+        return Err(AppError::BadRequest(
+            "Problem name is required".to_string(),
+        ));
+    }
+
+    let _init_guard = state.init_lock.lock().await;
+
+    match inspect_problem_config(&state.base_dir).await {
+        ProblemConfigState::Initialized { .. } => {
+            return Err(AppError::Conflict(
+                "Directory is already initialized".to_string(),
+            ));
+        }
+        ProblemConfigState::Invalid { .. } => {
+            return Err(AppError::Conflict(
+                "Directory has an invalid pahcer_config.toml. Fix or remove it before initializing."
+                    .to_string(),
+            ));
+        }
+        ProblemConfigState::Uninitialized => {}
+    }
+
+    let mut command = Command::new(&state.pahcer_program);
+    command
+        .arg("init")
+        .arg("-p")
+        .arg(problem)
+        .arg("-o")
+        .arg(request.objective.as_arg())
+        .arg("-l")
+        .arg(request.language.as_arg())
+        .current_dir(&state.base_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    if request.interactive {
+        command.arg("-i");
+    }
+
+    let output = command
+        .output()
+        .await
+        .map_err(|error| AppError::CommandFailed(format!("Failed to spawn pahcer: {error}")))?;
+
+    if !output.status.success() {
+        return Err(AppError::CommandFailed(command_output_message(
+            &output,
+            format!("pahcer init failed with status {}", output.status),
+        )));
+    }
+
+    match inspect_problem_config(&state.base_dir).await {
+        ProblemConfigState::Initialized { .. } => {}
+        ProblemConfigState::Uninitialized => {
+            return Err(AppError::CommandFailed(command_output_message(
+                &output,
+                "pahcer init succeeded but pahcer_config.toml was not created".to_string(),
+            )));
+        }
+        ProblemConfigState::Invalid { message } => {
+            return Err(AppError::CommandFailed(command_output_message(
+                &output,
+                format!("pahcer init succeeded but pahcer_config.toml is invalid: {message}"),
+            )));
+        }
+    }
+
+    Ok(Json(load_config_response(&state).await?))
+}
+
+fn command_output_message(output: &std::process::Output, fallback: String) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !stderr.is_empty() {
+        return format!("{fallback}: {stderr}");
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if !stdout.is_empty() {
+        return format!("{fallback}: {stdout}");
+    }
+
+    fallback
+}
+
+async fn load_config_response(state: &AppState) -> Result<ConfigResponse, AppError> {
     let global = state.storage.get_global_config().await?;
     let local = state.storage.get_local_config().await?;
-    Ok(Json(ConfigResponse {
+    let (initialization_state, initialization_error, problem_name) =
+        match inspect_problem_config(&state.base_dir).await {
+            ProblemConfigState::Initialized { problem_name } => {
+                (InitializationState::Initialized, None, Some(problem_name))
+            }
+            ProblemConfigState::Uninitialized => {
+                (InitializationState::Uninitialized, None, None)
+            }
+            ProblemConfigState::Invalid { message } => {
+                (InitializationState::Invalid, Some(message), None)
+            }
+        };
+
+    Ok(ConfigResponse {
         global,
         local,
-        problem_name: state.problem_name,
-    }))
+        initialization_state,
+        initialization_error,
+        problem_name,
+        base_dir: state.base_dir.to_string_lossy().to_string(),
+    })
 }
 
 async fn save_global_config(
@@ -583,6 +695,9 @@ mod tests {
     #[tokio::test]
     async fn config_roundtrip_works() {
         let dir = tempdir().unwrap();
+        unsafe {
+            std::env::set_var("XDG_CONFIG_HOME", dir.path());
+        }
         let frontend = dir.path().join("dist");
         tokio::fs::create_dir_all(&frontend).await.unwrap();
         tokio::fs::write(frontend.join("index.html"), "<html></html>")
@@ -634,5 +749,7 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["global"]["defaultSeed"], 0);
         assert_eq!(json["global"]["visualizerPosition"], "right");
+        assert_eq!(json["initializationState"], "uninitialized");
+        assert!(json["problemName"].is_null());
     }
 }
