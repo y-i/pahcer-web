@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, type GlobalConfig } from './api';
+    import { api, type ConfigResponse, type GlobalConfig } from './api';
+
+    let { initialConfig }: { initialConfig: ConfigResponse } = $props();
 
   let historyData = $state<any[]>([]);
   let isLoading = $state(true);
@@ -36,12 +38,9 @@
     
     (async () => {
       try {
-        const [historyRes, configRes] = await Promise.all([
-          api.getHistory(),
-          api.getConfig()
-        ]);
+                const historyRes = await api.getHistory();
         historyData = historyRes;
-        config = configRes.global;
+                config = initialConfig.global;
 
         seed = config.defaultSeed;
         scalePercent = Math.round(config.defaultScale * 100);

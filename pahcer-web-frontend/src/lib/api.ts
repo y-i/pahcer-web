@@ -11,6 +11,10 @@ export interface TestRunNotificationSettings {
   testRunCompleted: boolean;
 }
 
+export type InitializationState = 'initialized' | 'uninitialized' | 'invalid';
+export type InitObjective = 'max' | 'min';
+export type InitLanguage = 'cpp' | 'python' | 'rust' | 'go';
+
 export type PersistedTestRunOptions = Omit<TestRunOptions, 'comment' | 'tag'>;
 
 export interface RunLogEntry {
@@ -52,9 +56,19 @@ export interface LocalConfig {
 }
 
 export interface ConfigResponse {
+  initializationState: InitializationState;
+  initializationError: string | null;
   global: GlobalConfig;
   local: LocalConfig;
-  problemName?: string;
+  problemName: string | null;
+  baseDir: string;
+}
+
+export interface InitRequest {
+  problem: string;
+  objective: InitObjective;
+  language: InitLanguage;
+  interactive: boolean;
 }
 
 export interface JobMetadata {
@@ -89,6 +103,16 @@ export const api = {
   async getConfig(): Promise<ConfigResponse> {
     const res = await fetch('/api/config');
     await assertOk(res, 'Failed to load config');
+    return res.json();
+  },
+
+  async initProject(request: InitRequest): Promise<ConfigResponse> {
+    const res = await fetch('/api/init', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+    });
+    await assertOk(res, 'Failed to initialize project');
     return res.json();
   },
 

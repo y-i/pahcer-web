@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
-  import { api } from './api';
+  import type { ConfigResponse } from './api';
   import {
     clearRunLogs,
     hydrateTestRunState,
@@ -11,18 +11,14 @@
     testRunState,
   } from './testRunState';
 
+  let { initialConfig }: { initialConfig: ConfigResponse } = $props();
+
   let logContainer: HTMLDivElement;
   let shouldStickToBottom = $state(true);
 
   onMount(async () => {
     refreshNotificationPermission();
-
-    try {
-      const res = await api.getConfig();
-      hydrateTestRunState(res.global);
-    } catch (e) {
-      console.error('Failed to load config', e);
-    }
+    hydrateTestRunState(initialConfig.global);
   });
 
   $effect(() => {

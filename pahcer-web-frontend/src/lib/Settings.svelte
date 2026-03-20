@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import {
     api,
+    type ConfigResponse,
     DEFAULT_TEST_RUN_OPTIONS,
     type GlobalConfig,
     type LocalConfig,
@@ -12,6 +13,14 @@
     type NotificationSupportState,
   } from './notifications';
   import { syncSavedTestRunDefaults } from './testRunState';
+
+  interface Props {
+    initialConfig: ConfigResponse;
+    onConfigChange: (config: ConfigResponse) => void;
+  }
+
+  let { initialConfig, onConfigChange }: Props = $props();
+  let configSnapshot = $state<ConfigResponse | null>(null);
 
   let globalConfig = $state<GlobalConfig>({
     visualizerPosition: 'right',
@@ -43,43 +52,38 @@
   let message = $state('');
   let notificationPermission = $state<NotificationSupportState>('unsupported');
 
+  $effect(() => {
+    configSnapshot = initialConfig;
+  });
+
   onMount(async () => {
     notificationPermission = getNotificationSupportState();
 
-    try {
-      const res = await api.getConfig();
-      globalConfig = { 
-        ...globalConfig, 
-        ...res.global,
-        testRunOptions: {
-          shuffle: res.global.testRunOptions?.shuffle ?? globalConfig.testRunOptions!.shuffle,
-          settingFile: res.global.testRunOptions?.settingFile ?? globalConfig.testRunOptions!.settingFile,
-          freezeBestScores: res.global.testRunOptions?.freezeBestScores ?? globalConfig.testRunOptions!.freezeBestScores,
-          noCompile: res.global.testRunOptions?.noCompile ?? globalConfig.testRunOptions!.noCompile,
-        },
-        notifications: {
-          testRunCompleted: res.global.notifications?.testRunCompleted ?? globalConfig.notifications!.testRunCompleted,
-        },
-      };
-      localConfig = { ...localConfig, ...res.local };
-      syncSavedTestRunDefaults({
-        shuffle: res.global.testRunOptions?.shuffle ?? DEFAULT_TEST_RUN_OPTIONS.shuffle,
-        settingFile: res.global.testRunOptions?.settingFile ?? DEFAULT_TEST_RUN_OPTIONS.settingFile,
-        freezeBestScores: res.global.testRunOptions?.freezeBestScores ?? DEFAULT_TEST_RUN_OPTIONS.freezeBestScores,
-        noCompile: res.global.testRunOptions?.noCompile ?? DEFAULT_TEST_RUN_OPTIONS.noCompile,
-      });
-      
-      // Store initial state for comparison
-      initialGlobalConfig = JSON.parse(JSON.stringify(globalConfig));
-      initialLocalConfig = JSON.parse(JSON.stringify(localConfig));
-      
-      // ロードした値をパーセントに変換
-      scalePercent = Math.round(globalConfig.defaultScale * 100);
-    } catch (e) {
-      console.error('Failed to load config', e);
-    } finally {
-      isLoading = false;
-    }
+    globalConfig = { 
+      ...globalConfig, 
+      ...initialConfig.global,
+      testRunOptions: {
+        shuffle: initialConfig.global.testRunOptions?.shuffle ?? globalConfig.testRunOptions!.shuffle,
+        settingFile: initialConfig.global.testRunOptions?.settingFile ?? globalConfig.testRunOptions!.settingFile,
+        freezeBestScores: initialConfig.global.testRunOptions?.freezeBestScores ?? globalConfig.testRunOptions!.freezeBestScores,
+        noCompile: initialConfig.global.testRunOptions?.noCompile ?? globalConfig.testRunOptions!.noCompile,
+      },
+      notifications: {
+        testRunCompleted: initialConfig.global.notifications?.testRunCompleted ?? globalConfig.notifications!.testRunCompleted,
+      },
+    };
+    localConfig = { ...localConfig, ...initialConfig.local };
+    syncSavedTestRunDefaults({
+      shuffle: initialConfig.global.testRunOptions?.shuffle ?? DEFAULT_TEST_RUN_OPTIONS.shuffle,
+      settingFile: initialConfig.global.testRunOptions?.settingFile ?? DEFAULT_TEST_RUN_OPTIONS.settingFile,
+      freezeBestScores: initialConfig.global.testRunOptions?.freezeBestScores ?? DEFAULT_TEST_RUN_OPTIONS.freezeBestScores,
+      noCompile: initialConfig.global.testRunOptions?.noCompile ?? DEFAULT_TEST_RUN_OPTIONS.noCompile,
+    });
+    
+    initialGlobalConfig = JSON.parse(JSON.stringify(globalConfig));
+    initialLocalConfig = JSON.parse(JSON.stringify(localConfig));
+    scalePercent = Math.round(globalConfig.defaultScale * 100);
+    isLoading = false;
   });
 
   // Check for unsaved changes
@@ -114,6 +118,12 @@
         noCompile: nextGlobalConfig.testRunOptions?.noCompile ?? DEFAULT_TEST_RUN_OPTIONS.noCompile,
       });
       initialGlobalConfig = JSON.parse(JSON.stringify(nextGlobalConfig));
+      const baseConfig = configSnapshot ?? initialConfig;
+      configSnapshot = {
+        ...baseConfig,
+        global: nextGlobalConfig,
+      };
+      onConfigChange(configSnapshot);
       showMessage('Global config saved!');
     } catch (e) {
       showMessage(e instanceof Error ? e.message : 'Failed to save global config', true);
@@ -138,6 +148,12 @@
       
       await api.saveLocalConfig(localConfig);
       initialLocalConfig = JSON.parse(JSON.stringify(localConfig));
+      const baseConfig = configSnapshot ?? initialConfig;
+      configSnapshot = {
+        ...baseConfig,
+        local: { ...localConfig },
+      };
+      onConfigChange(configSnapshot);
       showMessage('Local config saved and visualizer downloaded!');
     } catch (e) {
       console.error(e);

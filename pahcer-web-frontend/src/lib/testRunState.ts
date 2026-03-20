@@ -4,6 +4,7 @@ import {
   DEFAULT_NOTIFICATION_SETTINGS,
   DEFAULT_TEST_RUN_OPTIONS,
   type GlobalConfig,
+  type PersistedTestRunOptions,
   type RunLogEntry,
   type RunStreamEvent,
   type TestRunNotificationSettings,
