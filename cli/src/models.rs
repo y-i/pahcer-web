@@ -3,6 +3,50 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum InitializationState {
+    Initialized,
+    Uninitialized,
+    Invalid,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum InitObjective {
+    Max,
+    Min,
+}
+
+impl InitObjective {
+    pub fn as_arg(self) -> &'static str {
+        match self {
+            Self::Max => "max",
+            Self::Min => "min",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum InitLanguage {
+    Cpp,
+    Python,
+    Rust,
+    Go,
+}
+
+impl InitLanguage {
+    pub fn as_arg(self) -> &'static str {
+        match self {
+            Self::Cpp => "cpp",
+            Self::Python => "python",
+            Self::Rust => "rust",
+            Self::Go => "go",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum VisualizerPosition {
@@ -107,7 +151,19 @@ pub struct ListResponse {
 pub struct ConfigResponse {
     pub global: GlobalConfig,
     pub local: LocalConfig,
-    pub problem_name: String,
+    pub initialization_state: InitializationState,
+    pub initialization_error: Option<String>,
+    pub problem_name: Option<String>,
+    pub base_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct InitRequest {
+    pub problem: String,
+    pub objective: InitObjective,
+    pub language: InitLanguage,
+    pub interactive: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

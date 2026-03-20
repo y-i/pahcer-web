@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api } from './api';
+    import { api, type ConfigResponse } from './api';
+    import { navigateToTab } from './navigation';
+
+    let { initialConfig }: { initialConfig: ConfigResponse } = $props();
 
   let iframeSrc = $state('/analysis/index.html');
   let isLoading = $state(false);
@@ -10,21 +13,15 @@
   let scoreType = $state<'raw' | 'max' | 'min' | 'rank_max' | 'rank_min' | ''>('');
 
   onMount(async () => {
-    try {
-      const config = await api.getConfig();
-      hasVisualizerUrl = !!(config.local.visualizerUrl || config.global.visualizerUrl);
-      if (config.local.defaultScoreType) {
-          scoreType = config.local.defaultScoreType;
-      }
-      if (config.problemName) {
-          problemName = config.problemName;
-          updateIframeSrc();
-      }
-    } catch (e) {
-      console.error('Failed to load config:', e);
-    } finally {
-      isCheckingConfig = false;
-    }
+        hasVisualizerUrl = !!(initialConfig.local.visualizerUrl || initialConfig.global.visualizerUrl);
+        if (initialConfig.local.defaultScoreType) {
+                scoreType = initialConfig.local.defaultScoreType;
+        }
+        if (initialConfig.problemName) {
+                problemName = initialConfig.problemName;
+        }
+        updateIframeSrc();
+        isCheckingConfig = false;
   });
 
   function updateIframeSrc(timestamp?: number) {
@@ -58,8 +55,7 @@
   }
 
   function goToSettings() {
-    history.pushState(null, '', '/settings');
-    window.dispatchEvent(new PopStateEvent('popstate'));
+        navigateToTab('settings');
   }
 </script>
 

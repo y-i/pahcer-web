@@ -1,6 +1,26 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { api, type GlobalConfig, type LocalConfig } from './api';
+  import {
+    api,
+    type ConfigResponse,
+    DEFAULT_TEST_RUN_OPTIONS,
+    type GlobalConfig,
+    type LocalConfig,
+  } from './api';
+  import {
+    getNotificationSupportState,
+    requestNotificationAccess,
+    type NotificationSupportState,
+  } from './notifications';
+  import { syncSavedTestRunDefaults } from './testRunState';
+
+  interface Props {
+    initialConfig: ConfigResponse;
+    onConfigChange: (config: ConfigResponse) => void;
+  }
+
+  let { initialConfig, onConfigChange }: Props = $props();
+  let configSnapshot = $state<ConfigResponse | null>(null);
 
   let globalConfig = $state<GlobalConfig>({
     visualizerPosition: 'right',
@@ -12,7 +32,10 @@
       settingFile: 'pahcer_config.toml',
       freezeBestScores: false,
       noCompile: false
-    }
+    },
+    notifications: {
+      testRunCompleted: false,
+    },
   });
 
   let localConfig = $state<LocalConfig>({
@@ -25,34 +48,42 @@
   let scalePercent = $state(100);
   let isLoading = $state(true);
   let isSaving = $state(false);
+  let isRequestingNotificationPermission = $state(false);
   let message = $state('');
+  let notificationPermission = $state<NotificationSupportState>('unsupported');
+
+  $effect(() => {
+    configSnapshot = initialConfig;
+  });
 
   onMount(async () => {
-    try {
-      const res = await api.getConfig();
-      globalConfig = { 
-        ...globalConfig, 
-        ...res.global,
-        testRunOptions: {
-          shuffle: res.global.testRunOptions?.shuffle ?? globalConfig.testRunOptions!.shuffle,
-          settingFile: res.global.testRunOptions?.settingFile ?? globalConfig.testRunOptions!.settingFile,
-          freezeBestScores: res.global.testRunOptions?.freezeBestScores ?? globalConfig.testRunOptions!.freezeBestScores,
-          noCompile: res.global.testRunOptions?.noCompile ?? globalConfig.testRunOptions!.noCompile,
-        }
-      };
-      localConfig = { ...localConfig, ...res.local };
-      
-      // Store initial state for comparison
-      initialGlobalConfig = JSON.parse(JSON.stringify(globalConfig));
-      initialLocalConfig = JSON.parse(JSON.stringify(localConfig));
-      
-      // ロードした値をパーセントに変換
-      scalePercent = Math.round(globalConfig.defaultScale * 100);
-    } catch (e) {
-      console.error('Failed to load config', e);
-    } finally {
-      isLoading = false;
-    }
+    notificationPermission = getNotificationSupportState();
+
+    globalConfig = { 
+      ...globalConfig, 
+      ...initialConfig.global,
+      testRunOptions: {
+        shuffle: initialConfig.global.testRunOptions?.shuffle ?? globalConfig.testRunOptions!.shuffle,
+        settingFile: initialConfig.global.testRunOptions?.settingFile ?? globalConfig.testRunOptions!.settingFile,
+        freezeBestScores: initialConfig.global.testRunOptions?.freezeBestScores ?? globalConfig.testRunOptions!.freezeBestScores,
+        noCompile: initialConfig.global.testRunOptions?.noCompile ?? globalConfig.testRunOptions!.noCompile,
+      },
+      notifications: {
+        testRunCompleted: initialConfig.global.notifications?.testRunCompleted ?? globalConfig.notifications!.testRunCompleted,
+      },
+    };
+    localConfig = { ...localConfig, ...initialConfig.local };
+    syncSavedTestRunDefaults({
+      shuffle: initialConfig.global.testRunOptions?.shuffle ?? DEFAULT_TEST_RUN_OPTIONS.shuffle,
+      settingFile: initialConfig.global.testRunOptions?.settingFile ?? DEFAULT_TEST_RUN_OPTIONS.settingFile,
+      freezeBestScores: initialConfig.global.testRunOptions?.freezeBestScores ?? DEFAULT_TEST_RUN_OPTIONS.freezeBestScores,
+      noCompile: initialConfig.global.testRunOptions?.noCompile ?? DEFAULT_TEST_RUN_OPTIONS.noCompile,
+    });
+    
+    initialGlobalConfig = JSON.parse(JSON.stringify(globalConfig));
+    initialLocalConfig = JSON.parse(JSON.stringify(localConfig));
+    scalePercent = Math.round(globalConfig.defaultScale * 100);
+    isLoading = false;
   });
 
   // Check for unsaved changes
@@ -74,12 +105,28 @@
   async function saveGlobal() {
     try {
       // パーセントを小数に戻して保存
-      globalConfig.defaultScale = scalePercent / 100;
-      await api.saveGlobalConfig(globalConfig);
-      initialGlobalConfig = JSON.parse(JSON.stringify(globalConfig));
+      const nextGlobalConfig = {
+        ...globalConfig,
+        defaultScale: scalePercent / 100,
+      };
+      await api.saveGlobalConfig(nextGlobalConfig);
+      globalConfig = nextGlobalConfig;
+      syncSavedTestRunDefaults({
+        shuffle: nextGlobalConfig.testRunOptions?.shuffle ?? DEFAULT_TEST_RUN_OPTIONS.shuffle,
+        settingFile: nextGlobalConfig.testRunOptions?.settingFile ?? DEFAULT_TEST_RUN_OPTIONS.settingFile,
+        freezeBestScores: nextGlobalConfig.testRunOptions?.freezeBestScores ?? DEFAULT_TEST_RUN_OPTIONS.freezeBestScores,
+        noCompile: nextGlobalConfig.testRunOptions?.noCompile ?? DEFAULT_TEST_RUN_OPTIONS.noCompile,
+      });
+      initialGlobalConfig = JSON.parse(JSON.stringify(nextGlobalConfig));
+      const baseConfig = configSnapshot ?? initialConfig;
+      configSnapshot = {
+        ...baseConfig,
+        global: nextGlobalConfig,
+      };
+      onConfigChange(configSnapshot);
       showMessage('Global config saved!');
     } catch (e) {
-      showMessage('Failed to save global config', true);
+      showMessage(e instanceof Error ? e.message : 'Failed to save global config', true);
     }
   }
 
@@ -101,10 +148,16 @@
       
       await api.saveLocalConfig(localConfig);
       initialLocalConfig = JSON.parse(JSON.stringify(localConfig));
+      const baseConfig = configSnapshot ?? initialConfig;
+      configSnapshot = {
+        ...baseConfig,
+        local: { ...localConfig },
+      };
+      onConfigChange(configSnapshot);
       showMessage('Local config saved and visualizer downloaded!');
     } catch (e) {
       console.error(e);
-      showMessage('Error occurred during save/download', true);
+      showMessage(e instanceof Error ? e.message : 'Error occurred during save/download', true);
     } finally {
       isSaving = false;
     }
@@ -113,6 +166,25 @@
   function showMessage(msg: string, isError = false) {
     message = msg;
     setTimeout(() => message = '', 5000);
+  }
+
+  async function handleNotificationPermissionRequest() {
+    isRequestingNotificationPermission = true;
+
+    try {
+      notificationPermission = await requestNotificationAccess();
+      if (notificationPermission === 'granted') {
+        showMessage('Notification permission granted.');
+      } else if (notificationPermission === 'denied') {
+        showMessage('Notification permission denied.', true);
+      } else if (notificationPermission === 'default') {
+        showMessage('Notification permission request was dismissed.');
+      }
+    } catch (e) {
+      showMessage('Failed to request notification permission.', true);
+    } finally {
+      isRequestingNotificationPermission = false;
+    }
   }
 </script>
 
@@ -158,8 +230,9 @@
           <div class="p-6 space-y-6">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div class="col-span-1 md:col-span-2">
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Visualizer Position</label>
+                  <label class="block text-sm font-medium text-gray-700 mb-1" for="visualizer-position">Visualizer Position</label>
                     <select
+                    id="visualizer-position"
                         bind:value={globalConfig.visualizerPosition}
                         class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm transition-shadow"
                     >
@@ -170,8 +243,9 @@
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Default Seed</label>
+          <label class="block text-sm font-medium text-gray-700 mb-1" for="default-seed">Default Seed</label>
                     <input
+            id="default-seed"
                         type="number"
                         bind:value={globalConfig.defaultSeed}
                         class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-shadow"
@@ -179,9 +253,10 @@
                 </div>
                 
                 <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Default Scale (%)</label>
+                  <label class="block text-sm font-medium text-gray-700 mb-1" for="default-scale">Default Scale (%)</label>
                     <div class="relative">
                         <input
+                      id="default-scale"
                             type="number"
                             step="5"
                             bind:value={scalePercent}
@@ -197,8 +272,9 @@
                 <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">Default Test Run Options</h3>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                        <label class="block text-sm font-medium text-gray-700 mb-1">Default Setting File</label>
+                    <label class="block text-sm font-medium text-gray-700 mb-1" for="default-setting-file">Default Setting File</label>
                         <input
+                      id="default-setting-file"
                             type="text"
                             bind:value={globalConfig.testRunOptions!.settingFile}
                             placeholder="pahcer_config.toml"
@@ -222,6 +298,41 @@
                 </div>
             </div>
 
+                <div class="pt-6 border-t border-gray-100 space-y-4">
+                  <div class="flex items-start justify-between gap-4">
+                    <div class="space-y-1">
+                      <h3 class="text-sm font-bold text-gray-400 uppercase tracking-widest">Notifications</h3>
+                      <p class="text-sm text-gray-500">Use this default for the next run. Permission requests only happen from the button below.</p>
+                    </div>
+                    <span class="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium
+                      {notificationPermission === 'granted' ? 'bg-green-100 text-green-700' : notificationPermission === 'unsupported' ? 'bg-gray-100 text-gray-600' : notificationPermission === 'denied' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}">
+                      {notificationPermission === 'granted'
+                        ? 'Permission granted'
+                        : notificationPermission === 'denied'
+                        ? 'Permission denied'
+                        : notificationPermission === 'default'
+                          ? 'Permission not requested'
+                          : 'Not supported'}
+                    </span>
+                  </div>
+
+                  <label class="flex items-center space-x-3 cursor-pointer group">
+                    <input type="checkbox" bind:checked={globalConfig.notifications!.testRunCompleted} class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 transition-colors" />
+                    <span class="text-sm text-gray-600 group-hover:text-gray-900">Enable desktop notification by default when a run completes</span>
+                  </label>
+
+                  <div class="flex items-center justify-between gap-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                    <p class="text-sm text-gray-600">If notifications are blocked or unsupported, runs still finish normally and no notification is shown.</p>
+                    <button
+                      onclick={handleNotificationPermissionRequest}
+                      disabled={notificationPermission === 'unsupported' || isRequestingNotificationPermission}
+                      class="inline-flex justify-center py-2 px-4 border border-gray-300 shadow-sm text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors disabled:opacity-50"
+                    >
+                      {isRequestingNotificationPermission ? 'Requesting...' : 'Request Permission'}
+                    </button>
+                  </div>
+                </div>
+
             <div class="pt-4 border-t border-gray-100 flex justify-end">
                 <button
                     onclick={saveGlobal}
@@ -242,8 +353,9 @@
 
           <div class="p-6 space-y-6">
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Project Visualizer URL</label>
+              <label class="block text-sm font-medium text-gray-700 mb-1" for="project-visualizer-url">Project Visualizer URL</label>
               <input
+                id="project-visualizer-url"
                 type="url"
                 bind:value={localConfig.visualizerUrl}
                 placeholder="https://img.atcoder.jp/..."
@@ -253,8 +365,9 @@
             </div>
 
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Default Score Type</label>
+              <label class="block text-sm font-medium text-gray-700 mb-1" for="default-score-type">Default Score Type</label>
               <select
+                id="default-score-type"
                 bind:value={localConfig.defaultScoreType}
                 class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm transition-shadow"
               >
@@ -269,8 +382,9 @@
             </div>
 
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Input Parameter Names (CSV)</label>
+              <label class="block text-sm font-medium text-gray-700 mb-1" for="input-parameter-names">Input Parameter Names (CSV)</label>
               <input
+                id="input-parameter-names"
                 type="text"
                 bind:value={localConfig.inputParamNames}
                 placeholder="N,M,L,K"

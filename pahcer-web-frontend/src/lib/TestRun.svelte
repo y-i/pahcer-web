@@ -1,109 +1,59 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import { api, type GlobalConfig } from './api';
+  import { onMount, tick } from 'svelte';
+  import type { ConfigResponse } from './api';
+  import {
+    clearRunLogs,
+    hydrateTestRunState,
+    refreshNotificationPermission,
+    setRunNotificationEnabled,
+    setTestRunOption,
+    startTestRun,
+    testRunState,
+  } from './testRunState';
 
-  // Form states
-  let options = $state({
-    shuffle: false,
-    comment: '',
-    tag: '',
-    settingFile: 'pahcer_config.toml',
-    freezeBestScores: false,
-    noCompile: false
-  });
+  let { initialConfig }: { initialConfig: ConfigResponse } = $props();
 
-  let globalConfig = $state<GlobalConfig | null>(null);
+  let logContainer: HTMLDivElement;
+  let shouldStickToBottom = $state(true);
 
   onMount(async () => {
-    try {
-      const res = await api.getConfig();
-      globalConfig = res.global;
-      if (globalConfig?.testRunOptions) {
-        options = {
-          ...options,
-          ...globalConfig.testRunOptions,
-          comment: '', // Explicitly reset non-persisted fields
-          tag: ''
-        };
-      }
-    } catch (e) {
-      console.error('Failed to load config', e);
-    }
+    refreshNotificationPermission();
+    hydrateTestRunState(initialConfig.global);
   });
 
-  // Watch for changes to options and persist them
   $effect(() => {
-    if (globalConfig) {
-      const { comment, tag, ...persistableOptions } = options;
-      
-      // Compare to avoid infinite loop or unnecessary API calls
-      const currentPersisted = globalConfig.testRunOptions;
-      if (JSON.stringify(currentPersisted) !== JSON.stringify(persistableOptions)) {
-        const newConfig = {
-          ...globalConfig,
-          testRunOptions: persistableOptions
-        };
-        api.saveGlobalConfig(newConfig).then(() => {
-            globalConfig = newConfig;
-        });
-      }
+    const logCount = $testRunState.logs.length;
+
+    if (!logCount || !logContainer || !shouldStickToBottom) {
+      return;
     }
-  });
 
-  let logs = $state<{ type: 'stdout' | 'stderr' | 'info'; text: string }[]>([]);
-  let isRunning = $state(false);
-  let logContainer: HTMLDivElement;
-
-  $effect(() => {
-    if (logs.length && logContainer) {
+    void tick().then(() => {
+      if (logContainer) {
         logContainer.scrollTop = logContainer.scrollHeight;
-    }
+      }
+    });
   });
 
-  function buildArgs(): string[] {
-    const args: string[] = [];
-    if (options.shuffle) args.push('--shuffle');
-    if (options.comment) args.push('-c', options.comment);
-    if (options.tag) args.push('-t', options.tag);
-    if (options.settingFile && options.settingFile !== 'pahcer_config.toml') {
-      args.push('--setting-file', options.settingFile);
+  function handleLogScroll() {
+    if (!logContainer) {
+      return;
     }
-    if (options.freezeBestScores) args.push('--freeze-best-scores');
-    if (options.noCompile) args.push('--no-compile');
-    
-    return args;
+
+    const distanceFromBottom = logContainer.scrollHeight - logContainer.scrollTop - logContainer.clientHeight;
+    shouldStickToBottom = distanceFromBottom < 48;
   }
 
-  async function handleRun() {
-    if (isRunning) return;
-    
-    isRunning = true;
-    logs = [{ type: 'info', text: 'Starting pahcer run...' }];
-    
-    const argList = buildArgs();
-    logs.push({ type: 'info', text: `Command: pahcer run ${argList.join(' ')}` });
-    
-    try {
-      await api.runPahcer(argList, (data) => {
-        if (data.type === 'stdout' || data.type === 'stderr') {
-          logs.push({ type: data.type, text: data.data });
-        } else if (data.type === 'exit') {
-          logs.push({ type: 'info', text: `Process exited with code ${data.code}` });
-          isRunning = false;
-        }
-      });
-    } catch (e) {
-      logs.push({ type: 'stderr', text: `Error: ${e}` });
-      isRunning = false;
-    }
+  function updateTextOption(key: 'comment' | 'tag' | 'settingFile', value: string) {
+    setTestRunOption(key, value);
   }
 
-  function clearLogs() {
-    logs = [];
+  function updateBooleanOption(key: 'shuffle' | 'freezeBestScores' | 'noCompile', value: boolean) {
+    setTestRunOption(key, value);
   }
 </script>
 
-<div class="h-full flex flex-col bg-gray-50 p-6 gap-6 overflow-hidden">
+<div class="h-full min-h-0 flex flex-col bg-gray-50 p-6 gap-6 overflow-hidden">
 
   <!-- Top Control Panel Card -->
 
@@ -121,7 +71,7 @@
 
              <button
 
-                onclick={clearLogs}
+              onclick={clearRunLogs}
 
                 class="px-4 py-2 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
 
@@ -133,15 +83,15 @@
 
             <button
 
-                onclick={handleRun}
+              onclick={startTestRun}
 
-                disabled={isRunning}
+              disabled={$testRunState.isRunning}
 
                 class="px-6 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all transform active:scale-95"
 
             >
 
-                {#if isRunning}
+              {#if $testRunState.isRunning}
 
                     <span class="flex items-center">
 
@@ -187,7 +137,8 @@
 
               type="text"
 
-              bind:value={options.comment}
+              value={$testRunState.options.comment}
+              oninput={(event) => updateTextOption('comment', event.currentTarget.value)}
 
               placeholder="Optional comment"
 
@@ -207,7 +158,8 @@
 
               type="text"
 
-              bind:value={options.tag}
+              value={$testRunState.options.tag}
+              oninput={(event) => updateTextOption('tag', event.currentTarget.value)}
 
               placeholder="Optional tag"
 
@@ -235,7 +187,8 @@
 
                 type="text"
 
-                bind:value={options.settingFile}
+                value={$testRunState.options.settingFile}
+                oninput={(event) => updateTextOption('settingFile', event.currentTarget.value)}
 
                 placeholder="pahcer_config.toml"
 
@@ -255,7 +208,7 @@
 
             <label class="flex items-center space-x-3 cursor-pointer group">
 
-                <input type="checkbox" bind:checked={options.shuffle} class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 transition-colors" />
+                <input type="checkbox" checked={$testRunState.options.shuffle} onchange={(event) => updateBooleanOption('shuffle', event.currentTarget.checked)} class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 transition-colors" />
 
                 <span class="text-sm text-gray-600 group-hover:text-gray-900 font-medium">Shuffle cases</span>
 
@@ -263,7 +216,7 @@
 
             <label class="flex items-center space-x-3 cursor-pointer group">
 
-                <input type="checkbox" bind:checked={options.freezeBestScores} class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 transition-colors" />
+                <input type="checkbox" checked={$testRunState.options.freezeBestScores} onchange={(event) => updateBooleanOption('freezeBestScores', event.currentTarget.checked)} class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 transition-colors" />
 
                 <span class="text-sm text-gray-600 group-hover:text-gray-900 font-medium">Freeze Best Scores</span>
 
@@ -271,12 +224,49 @@
 
              <label class="flex items-center space-x-3 cursor-pointer group">
 
-                <input type="checkbox" bind:checked={options.noCompile} class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 transition-colors" />
+                <input type="checkbox" checked={$testRunState.options.noCompile} onchange={(event) => updateBooleanOption('noCompile', event.currentTarget.checked)} class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 transition-colors" />
 
                 <span class="text-sm text-gray-600 group-hover:text-gray-900 font-medium">No Compile</span>
 
             </label>
 
+            <label class="flex items-center space-x-3 cursor-pointer group">
+
+                <input type="checkbox" checked={$testRunState.notifications.currentEnabled} onchange={(event) => setRunNotificationEnabled(event.currentTarget.checked)} disabled={$testRunState.isRunning} class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500 transition-colors disabled:cursor-not-allowed disabled:opacity-60" />
+
+                <span class="text-sm text-gray-600 group-hover:text-gray-900 font-medium">Notify when this run completes</span>
+
+            </label>
+
+            <div class="col-span-2 text-xs text-gray-500 flex items-center justify-between gap-3">
+                <span>
+                    Default from Settings: {$testRunState.notifications.defaultEnabled ? 'enabled' : 'disabled'}
+                </span>
+                <span>
+                    Notification permission: {$testRunState.notifications.permission}
+                </span>
+            </div>
+
+              {#if $testRunState.isRunning}
+                <div class="col-span-2 text-xs text-amber-600">
+                Notification setting is locked for the active run and will apply as {$testRunState.notifications.currentEnabled ? 'enabled' : 'disabled'} until completion.
+                </div>
+              {/if}
+
+        </div>
+
+        <div class="lg:col-span-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 space-y-1">
+          <div class="flex items-center justify-between gap-4 text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
+            <span>Current command</span>
+            {#if $testRunState.lastExitCode !== null}
+              <span class={$testRunState.lastExitCode === 0 ? 'text-green-600' : 'text-red-500'}>
+                Exit code {$testRunState.lastExitCode}
+              </span>
+            {/if}
+          </div>
+          <div class="text-sm font-mono text-gray-700 break-all">
+            {$testRunState.currentCommand || 'pahcer run'}
+          </div>
         </div>
 
       </div>
@@ -289,9 +279,9 @@
 
   <!-- Console Output Card -->
 
-  <div class="flex-1 flex flex-col min-h-0 bg-gray-950 text-gray-300 font-mono text-sm relative rounded-xl shadow-2xl overflow-hidden border border-gray-800">
+  <div class="flex-1 min-h-0 flex flex-col bg-gray-950 text-gray-300 font-mono text-sm relative rounded-xl shadow-2xl overflow-hidden border border-gray-800">
 
-    <div class="px-6 py-2 bg-gray-900/80 border-b border-gray-800 flex justify-between items-center select-none backdrop-blur-sm sticky top-0 z-10">
+    <div class="px-6 py-2 bg-gray-900/80 border-b border-gray-800 flex justify-between items-center select-none backdrop-blur-sm flex-shrink-0 z-10">
 
       <div class="flex items-center space-x-2">
 
@@ -301,7 +291,7 @@
 
       </div>
 
-      {#if isRunning}
+      {#if $testRunState.isRunning}
 
         <div class="flex items-center space-x-2 px-2 py-1 bg-green-900/20 rounded border border-green-900/30">
 
@@ -325,11 +315,12 @@
 
         bind:this={logContainer}
 
-        class="flex-1 overflow-y-auto p-6 space-y-1.5 scroll-smooth custom-scrollbar"
+        class="flex-1 min-h-0 overflow-y-auto p-6 space-y-1.5 scroll-smooth custom-scrollbar"
+        onscroll={handleLogScroll}
 
     >
 
-      {#each logs as log}
+      {#each $testRunState.logs as log}
 
         <div class="leading-relaxed break-words {log.type === 'stderr' ? 'text-red-400' : log.type === 'info' ? 'text-indigo-400 font-bold' : 'text-gray-300'}">
 
@@ -339,7 +330,7 @@
 
       {/each}
 
-      {#if logs.length === 0}
+      {#if $testRunState.logs.length === 0}
 
         <div class="h-full flex flex-col items-center justify-center text-gray-700 select-none">
 

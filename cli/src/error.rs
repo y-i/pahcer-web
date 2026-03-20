@@ -20,6 +20,8 @@ pub enum AppError {
     Toml(#[from] toml::de::Error),
     #[error("Bad request: {0}")]
     BadRequest(String),
+    #[error("Conflict: {0}")]
+    Conflict(String),
     #[error("Not found: {0}")]
     NotFound(String),
     #[error("Command failed: {0}")]
@@ -32,6 +34,7 @@ impl AppError {
     fn status_code(&self) -> StatusCode {
         match self {
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::Conflict(_) => StatusCode::CONFLICT,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::CommandFailed(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::Io(err) if err.kind() == io::ErrorKind::NotFound => StatusCode::NOT_FOUND,
