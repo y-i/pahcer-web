@@ -14,7 +14,9 @@
   let visualizerUrl = $state('/visualizer/index.html');
   let config = $state<GlobalConfig>({
     visualizerPosition: 'right',
+        visualizerInitialScrollPosition: 'bottom',
     visualizerUrl: '',
+    resultJsonMode: 'symlink',
     defaultSeed: 0,
     defaultScale: 1.0
   });
@@ -28,7 +30,7 @@
     if (!selectedRow) return '';
     const filename = String(seed).padStart(4, '0') + '.txt';
     const outputUrl = encodeURIComponent(`/api/history/${selectedRow.id}/output/${filename}`);
-    return `${visualizerUrl}?output_url=${outputUrl}&seed=${seed}`;
+        return `${visualizerUrl}?output_url=${outputUrl}&seed=${seed}&initial_scroll=${config.visualizerInitialScrollPosition}`;
   });
 
   let isUpdatingFromHistory = false;
@@ -69,9 +71,6 @@
       if (id) {
           const row = historyData.find(r => r.id === id);
           if (row) {
-              if (row.id !== oldId) {
-                  try { sessionStorage.removeItem('pahcer_v_scroll'); } catch(e) {}
-              }
               selectedRow = row;
               const seedParam = params.get('seed');
               if (seedParam) seed = Number(seedParam);
@@ -92,9 +91,6 @@
   }
 
   function selectRow(row: any) {
-    if (selectedRow?.id !== row.id) {
-        try { sessionStorage.removeItem('pahcer_v_scroll'); } catch(e) {}
-    }
     selectedRow = row;
     // Reset to default values from config when opening a new result
     seed = config.defaultSeed;
