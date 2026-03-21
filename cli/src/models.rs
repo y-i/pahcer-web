@@ -55,6 +55,22 @@ pub enum VisualizerPosition {
     Right,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum VisualizerInitialScrollPosition {
+    Top,
+    #[default]
+    Bottom,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ResultJsonMode {
+    #[default]
+    Symlink,
+    Copy,
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ScoreType {
@@ -89,7 +105,9 @@ impl Default for TestRunOptions {
 #[serde(default, rename_all = "camelCase")]
 pub struct GlobalConfig {
     pub visualizer_position: VisualizerPosition,
+    pub visualizer_initial_scroll_position: VisualizerInitialScrollPosition,
     pub visualizer_url: Option<String>,
+    pub result_json_mode: ResultJsonMode,
     pub default_seed: u32,
     pub default_scale: f64,
     pub test_run_options: Option<TestRunOptions>,
@@ -101,7 +119,9 @@ impl Default for GlobalConfig {
     fn default() -> Self {
         Self {
             visualizer_position: VisualizerPosition::Right,
+            visualizer_initial_scroll_position: VisualizerInitialScrollPosition::Bottom,
             visualizer_url: None,
+            result_json_mode: ResultJsonMode::Symlink,
             default_seed: 0,
             default_scale: 1.0,
             test_run_options: None,
@@ -180,8 +200,50 @@ pub enum StreamMessage {
     Exit { code: i32 },
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default, rename_all = "snake_case")]
+pub struct PahcerCaseResult {
+    pub seed: Value,
+    pub score: f64,
+    pub relative_score: Option<f64>,
+    pub execution_time: Option<f64>,
+    pub error_message: Option<String>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default, rename_all = "snake_case")]
+pub struct PahcerResultFile {
+    pub start_time: String,
+    pub case_count: usize,
+    pub total_score: f64,
+    pub total_score_log10: f64,
+    pub total_relative_score: f64,
+    pub max_execution_time: f64,
+    pub comment: String,
+    pub tag_name: Option<String>,
+    pub wa_seeds: Vec<Value>,
+    pub cases: Vec<PahcerCaseResult>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct AdditionalResultMetadata {
+    pub id: String,
+    pub args: Vec<String>,
+    pub result_file_name: String,
+    pub avg_score: f64,
+    pub avg_log_score: f64,
+    pub avg_relative_score: f64,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(default, rename_all = "camelCase")]
 pub struct StoredResult {
     pub id: String,
     pub datetime: String,

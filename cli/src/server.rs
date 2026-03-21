@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     convert::Infallible,
     path::{Path, PathBuf},
     process::Stdio,
@@ -13,7 +14,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use bytes::Bytes;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use mime_guess::from_path;
 use serde_json::{Value, json};
@@ -31,14 +32,12 @@ use crate::{
     analysis::{download_analysis_html, generate_input_csv, generate_result_csv},
     error::AppError,
     models::{
-        ConfigResponse, InitRequest, InitializationState, JobMetadata, JobStatus, LocalConfig,
-        RunRequest, StoredResult, StreamMessage,
+        AdditionalResultMetadata, ConfigResponse, InitRequest, InitializationState, JobMetadata,
+        JobStatus, LocalConfig, RunRequest, StoredResult, StreamMessage,
     },
-    pahcer::{
-        collect_details, compute_stats, ensure_json_flag, extract_comment_tag, get_pahcer_list,
-    },
+    pahcer::{average_from_total, ensure_json_flag, extract_comment_tag, get_pahcer_list},
     problem_config::{ProblemConfigState, inspect_problem_config},
-    storage::Storage,
+    storage::{PahcerResultFileState, Storage},
     visualizer::{download_recursive, inject_output_loader},
 };
 
@@ -275,7 +274,7 @@ async fn get_jobs(State(state): State<AppState>) -> Result<Json<Vec<JobMetadata>
     Ok(Json(state.storage.get_jobs().await?))
 }
 
-async fn get_history(State(state): State<AppState>) -> Result<Json<Vec<Value>>, AppError> {
+async fn get_history(State(state): State<AppState>) -> Result<Json<Vec<StoredResult>>, AppError> {
     Ok(Json(state.storage.read_history().await?))
 }
 
@@ -353,10 +352,12 @@ async fn run_pahcer(
     let mut args = request.args;
     ensure_json_flag(&mut args);
     let (comment, tag) = extract_comment_tag(&args);
-    let timestamp = Utc::now().timestamp().to_string();
+    let run_started_at = Utc::now();
+    let timestamp = run_started_at.timestamp().to_string();
     let result_dir = state.storage.result_dir(&timestamp);
     let output_dir = result_dir.join("output");
     fs::create_dir_all(&output_dir).await?;
+    let existing_result_files = state.storage.list_pahcer_result_files().await?;
 
     let (sender, receiver) = mpsc::channel::<Result<Bytes, Infallible>>(64);
     let job_id = Utc::now().timestamp_millis().to_string();
@@ -367,6 +368,8 @@ async fn run_pahcer(
         tag,
         timestamp,
         job_id,
+        run_started_at,
+        existing_result_files,
         output_dir,
     };
 
@@ -398,6 +401,8 @@ struct RunTaskRequest {
     tag: String,
     timestamp: String,
     job_id: String,
+    run_started_at: DateTime<Utc>,
+    existing_result_files: HashMap<String, PahcerResultFileState>,
     output_dir: PathBuf,
 }
 
@@ -451,50 +456,118 @@ async fn run_pahcer_task(
         .map_err(|error| AppError::Internal(error.to_string()))??;
 
     let all_output = log_buffer.lock().await.clone();
-    let details = collect_details(&all_output);
-    let stats = compute_stats(details, &all_output);
+    let global_config = state.storage.get_global_config().await?;
 
-    if stats.cases > 0 {
-        copy_output_files(&state.base_dir, &request.output_dir).await?;
-        let stored = StoredResult {
-            id: request.timestamp.clone(),
-            datetime: Utc::now().to_rfc3339(),
-            args: request.args.clone(),
-            comment: request.comment,
-            tag: request.tag,
-            avg_score: stats.avg_score,
-            avg_log_score: stats.avg_log_score,
-            avg_relative_score: stats.avg_relative_score,
-            max_time: stats.max_time,
-            cases: stats.cases,
-            ac_case: stats.ac_case,
-            details: stats.details.clone(),
-            extra: Default::default(),
+    let finalize_result = async {
+        let Some((result_file_name, pahcer_result)) = state
+            .storage
+            .find_pahcer_result_for_run(
+                &request.existing_result_files,
+                request.run_started_at,
+                &request.comment,
+                &request.tag,
+            )
+            .await?
+        else {
+            return Err(AppError::CommandFailed(
+                "pahcer result json was not found after run".to_string(),
+            ));
         };
-        let result_path = state.storage.result_path(&request.timestamp);
-        if let Some(parent) = result_path.parent() {
-            fs::create_dir_all(parent).await?;
+
+        if pahcer_result.case_count == 0 {
+            return Ok(None);
         }
-        fs::write(&result_path, serde_json::to_vec_pretty(&stored)?).await?;
+
         state
             .storage
-            .save_job(JobMetadata {
-                id: request.job_id,
-                datetime: Utc::now().to_rfc3339(),
-                command: "run".to_string(),
-                args: request.args,
-                status: if exit_code == 0 {
-                    JobStatus::Success
-                } else {
-                    JobStatus::Failed
-                },
-                output_file: None,
-                result: Some(json!({ "score": stored.avg_score, "logs": all_output })),
-            })
+            .materialize_result_json(
+                &request.timestamp,
+                &result_file_name,
+                global_config.result_json_mode,
+            )
             .await?;
-    } else {
-        state.storage.delete_job(&request.job_id).await?;
-        state.storage.delete_result(&request.timestamp).await?;
+        copy_output_files(&state.base_dir, &request.output_dir).await?;
+
+        let additional = AdditionalResultMetadata {
+            id: request.timestamp.clone(),
+            args: request.args.clone(),
+            result_file_name,
+            avg_score: average_from_total(pahcer_result.total_score, pahcer_result.case_count),
+            avg_log_score: average_from_total(
+                pahcer_result.total_score_log10,
+                pahcer_result.case_count,
+            ),
+            avg_relative_score: average_from_total(
+                pahcer_result.total_relative_score,
+                pahcer_result.case_count,
+            ),
+            extra: Default::default(),
+        };
+        state
+            .storage
+            .save_additional_result(&request.timestamp, &additional)
+            .await?;
+
+        Ok(Some((additional, pahcer_result)))
+    }
+    .await;
+
+    match finalize_result {
+        Ok(Some((additional, pahcer_result))) => {
+            let stored = StoredResult {
+                id: additional.id.clone(),
+                datetime: pahcer_result.start_time.clone(),
+                args: additional.args.clone(),
+                comment: pahcer_result.comment.clone(),
+                tag: pahcer_result.tag_name.clone().unwrap_or_default(),
+                avg_score: additional.avg_score,
+                avg_log_score: additional.avg_log_score,
+                avg_relative_score: additional.avg_relative_score,
+                max_time: pahcer_result.max_execution_time * 1000.0,
+                cases: pahcer_result.case_count,
+                ac_case: pahcer_result
+                    .cases
+                    .iter()
+                    .filter(|case| {
+                        serde_json::to_value(case)
+                            .ok()
+                            .as_ref()
+                            .is_some_and(crate::pahcer::is_ac)
+                    })
+                    .count(),
+                details: pahcer_result
+                    .cases
+                    .iter()
+                    .filter_map(|case| serde_json::to_value(case).ok())
+                    .collect(),
+                extra: Default::default(),
+            };
+            state
+                .storage
+                .save_job(JobMetadata {
+                    id: request.job_id,
+                    datetime: Utc::now().to_rfc3339(),
+                    command: "run".to_string(),
+                    args: request.args,
+                    status: if exit_code == 0 {
+                        JobStatus::Success
+                    } else {
+                        JobStatus::Failed
+                    },
+                    output_file: None,
+                    result: Some(json!({ "score": stored.avg_score, "logs": all_output })),
+                })
+                .await?;
+        }
+        Ok(None) => {
+            state.storage.delete_job(&request.job_id).await?;
+            state.storage.delete_result(&request.timestamp).await?;
+        }
+        Err(error) => {
+            let error_message = error.to_string();
+            cleanup_failed_run(&state, &request, &all_output, &error_message).await?;
+            return Err(error);
+        }
     }
 
     let exit = StreamMessage::Exit { code: exit_code };
@@ -672,6 +745,27 @@ async fn copy_output_files(base_dir: &Path, output_dir: &Path) -> Result<(), App
     Ok(())
 }
 
+async fn cleanup_failed_run(
+    state: &AppState,
+    request: &RunTaskRequest,
+    logs: &str,
+    error_message: &str,
+) -> Result<(), AppError> {
+    state.storage.delete_result(&request.timestamp).await?;
+    state
+        .storage
+        .save_job(JobMetadata {
+            id: request.job_id.clone(),
+            datetime: Utc::now().to_rfc3339(),
+            command: "run".to_string(),
+            args: request.args.clone(),
+            status: JobStatus::Failed,
+            output_file: None,
+            result: Some(json!({ "error": error_message, "logs": logs })),
+        })
+        .await
+}
+
 fn serialize_stream_message(message: &StreamMessage) -> Bytes {
     let mut payload = serde_json::to_vec(message).unwrap_or_default();
     payload.push(b'\n');
@@ -688,7 +782,9 @@ mod tests {
     use tower::ServiceExt;
 
     use crate::{
-        models::{GlobalConfig, VisualizerPosition},
+        models::{
+            GlobalConfig, ResultJsonMode, VisualizerInitialScrollPosition, VisualizerPosition,
+        },
         server::{build_app, build_state},
     };
 
@@ -714,7 +810,9 @@ mod tests {
 
         let payload = serde_json::to_vec(&GlobalConfig {
             visualizer_position: VisualizerPosition::Right,
+            visualizer_initial_scroll_position: VisualizerInitialScrollPosition::Bottom,
             visualizer_url: Some("https://example.com".to_string()),
+            result_json_mode: ResultJsonMode::Copy,
             default_seed: 0,
             default_scale: 1.0,
             test_run_options: None,
@@ -748,8 +846,19 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(json["global"]["defaultSeed"], 0);
+        assert_eq!(json["global"]["resultJsonMode"], "copy");
         assert_eq!(json["global"]["visualizerPosition"], "right");
+        assert_eq!(json["global"]["visualizerInitialScrollPosition"], "bottom");
         assert_eq!(json["initializationState"], "uninitialized");
         assert!(json["problemName"].is_null());
+
+        let saved: serde_json::Value = serde_json::from_str(
+            &tokio::fs::read_to_string(state.storage.global_config_path())
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(saved["resultJsonMode"], "copy");
+        assert_eq!(saved["visualizerInitialScrollPosition"], "bottom");
     }
 }

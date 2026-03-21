@@ -4,6 +4,7 @@ use std::{
     process::Stdio,
 };
 
+use chrono::NaiveDateTime;
 use serde_json::Value;
 use tokio::{io::AsyncReadExt, process::Command};
 
@@ -165,6 +166,14 @@ pub fn compute_stats(details: Vec<Value>, all_output: &str) -> ComputedStats {
     }
 }
 
+pub fn average_from_total(total: f64, case_count: usize) -> f64 {
+    if case_count == 0 {
+        0.0
+    } else {
+        total / case_count as f64
+    }
+}
+
 pub async fn read_all_output(
     mut child: tokio::process::Child,
 ) -> Result<(String, String, i32), AppError> {
@@ -222,13 +231,20 @@ fn time_ms_of(value: &Value) -> f64 {
     execution_time.or(time).unwrap_or_default() * 1000.0
 }
 
-fn is_ac(value: &Value) -> bool {
+pub fn is_ac(value: &Value) -> bool {
     let no_error = match value.get("error_message") {
         None | Some(Value::Null) => true,
         Some(Value::String(message)) => message.trim().is_empty(),
         Some(_) => false,
     };
     score_of(value) > 0.0 && no_error
+}
+
+pub fn parse_result_file_datetime(file_name: &str) -> Option<NaiveDateTime> {
+    let timestamp = file_name
+        .strip_prefix("result_")?
+        .strip_suffix(".json")?;
+    NaiveDateTime::parse_from_str(timestamp, "%Y%m%d_%H%M%S").ok()
 }
 
 fn number_like(value: &Value) -> Option<f64> {
@@ -242,7 +258,8 @@ fn number_like(value: &Value) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::{
-        collect_details, compute_stats, ensure_json_flag, extract_comment_tag, parse_list_output,
+        average_from_total, collect_details, compute_stats, ensure_json_flag, extract_comment_tag,
+        parse_list_output, parse_result_file_datetime,
     };
 
     #[test]
@@ -292,5 +309,17 @@ mod tests {
         let parsed = parse_list_output("seed score\n0 10\n1 20\n");
         assert_eq!(parsed.len(), 2);
         assert_eq!(parsed[0].get("seed").map(String::as_str), Some("0"));
+    }
+
+    #[test]
+    fn average_from_total_handles_zero_cases() {
+        assert_eq!(average_from_total(100.0, 0), 0.0);
+        assert_eq!(average_from_total(100.0, 4), 25.0);
+    }
+
+    #[test]
+    fn result_file_datetime_is_parsed_from_filename() {
+        let parsed = parse_result_file_datetime("result_20260314_151401.json").unwrap();
+        assert_eq!(parsed.format("%Y-%m-%dT%H:%M:%S").to_string(), "2026-03-14T15:14:01");
     }
 }
