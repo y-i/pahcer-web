@@ -118,22 +118,45 @@ pub async fn download_recursive(
 pub fn inject_output_loader(html: &str) -> String {
     const SCRIPT: &str = r#"<script>
 (async function() {
-    const scrollKey = 'pahcer_v_scroll';
-    const restoreScroll = () => {
-        const saved = sessionStorage.getItem(scrollKey);
-        if (!saved) return;
-        try {
-            const { x, y } = JSON.parse(saved);
-            window.scrollTo(x, y);
-        } catch (_) {}
+    const params = new URLSearchParams(window.location.search);
+    const initialScrollPosition = params.get('initial_scroll') === 'top' ? 'top' : 'bottom';
+    const updateOutputWaitTimeoutMs = 10000;
+    const updateOutputRetryIntervalMs = 50;
+    const applyInitialScroll = () => {
+        if (initialScrollPosition === 'bottom') {
+            window.scrollTo(0, document.body.scrollHeight);
+        }
     };
 
-    window.addEventListener('scroll', () => {
-        sessionStorage.setItem(scrollKey, JSON.stringify({ x: window.pageXOffset, y: window.pageYOffset }));
-    }, { passive: true });
+    const wait = (ms) => new Promise((resolve) => {
+        window.setTimeout(resolve, ms);
+    });
+
+    const waitForUpdateOutput = async () => {
+        const deadline = Date.now() + updateOutputWaitTimeoutMs;
+
+        while (typeof window.updateOutput !== 'function' && Date.now() < deadline) {
+            await wait(updateOutputRetryIntervalMs);
+        }
+
+        return typeof window.updateOutput === 'function';
+    };
+
+    const recalculateOutputAndWaitForLayout = async () => {
+        if (!await waitForUpdateOutput()) {
+            return;
+        }
+
+        window.updateOutput();
+
+        await new Promise((resolve) => {
+            requestAnimationFrame(() => {
+                requestAnimationFrame(resolve);
+            });
+        });
+    };
 
     try {
-        const params = new URLSearchParams(window.location.search);
         const outputUrl = params.get('output_url');
         if (outputUrl) {
             const response = await fetch(outputUrl);
@@ -142,9 +165,6 @@ pub fn inject_output_loader(html: &str) -> String {
                 const el = document.getElementById('output') || document.getElementById('input') || document.querySelector('textarea');
                 if (el) {
                     el.value = text;
-                    el.dispatchEvent(new Event('input', { bubbles: true }));
-                    el.dispatchEvent(new Event('change', { bubbles: true }));
-                    setTimeout(restoreScroll, 10);
                 }
             }
         }
@@ -152,7 +172,8 @@ pub fn inject_output_loader(html: &str) -> String {
         console.error('Failed to inject output:', error);
     }
 
-    restoreScroll();
+    await recalculateOutputAndWaitForLayout();
+    applyInitialScroll();
 })();
 </script>"#;
 
@@ -215,7 +236,27 @@ mod tests {
     fn injects_script_before_body_end() {
         let html = "<html><body><textarea></textarea></body></html>";
         let injected = inject_output_loader(html);
+        let update_output_index = injected.find("window.updateOutput();").unwrap();
+        let apply_scroll_index = injected
+            .find("applyInitialScroll();")
+            .unwrap();
+
         assert!(injected.contains("output_url"));
+        assert!(injected.contains("initial_scroll"));
+        assert!(injected.contains("applyInitialScroll"));
+        assert!(injected.contains("if (initialScrollPosition === 'bottom')"));
+        assert!(injected.contains("window.scrollTo(0, document.body.scrollHeight);"));
+        assert!(injected.contains("waitForUpdateOutput"));
+        assert!(injected.contains("recalculateOutputAndWaitForLayout"));
+        assert!(!injected.contains("MutationObserver"));
+        assert!(!injected.contains("ResizeObserver"));
+        assert!(!injected.contains("beginInitialScrollStabilization"));
+        assert!(!injected.contains("layoutSettlingTimeoutMs"));
+        assert!(!injected.contains("maxStabilizationDurationMs"));
+        assert!(!injected.contains("restartSettlingTimer"));
+        assert!(!injected.contains("lastProgrammaticScrollTop"));
+        assert!(!injected.contains("dispatchEvent(new Event('input'"));
+        assert!(update_output_index < apply_scroll_index);
         assert!(injected.contains("</body>"));
     }
 
