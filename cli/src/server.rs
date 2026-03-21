@@ -724,7 +724,7 @@ async fn build_frontend(frontend_dir: &Path) -> Result<(), AppError> {
 fn default_frontend_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
-        .join("pahcer-web-frontend")
+        .join("frontend")
 }
 
 async fn copy_output_files(base_dir: &Path, output_dir: &Path) -> Result<(), AppError> {
