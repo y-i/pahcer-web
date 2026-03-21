@@ -6,6 +6,7 @@
     DEFAULT_TEST_RUN_OPTIONS,
     type GlobalConfig,
     type LocalConfig,
+    type VisualizerInitialScrollPosition,
   } from './api';
   import {
     getNotificationSupportState,
@@ -24,7 +25,9 @@
 
   let globalConfig = $state<GlobalConfig>({
     visualizerPosition: 'right',
+    visualizerInitialScrollPosition: 'bottom',
     visualizerUrl: '',
+    resultJsonMode: 'symlink',
     defaultSeed: 0,
     defaultScale: 1.0,
     testRunOptions: {
@@ -51,6 +54,11 @@
   let isRequestingNotificationPermission = $state(false);
   let message = $state('');
   let notificationPermission = $state<NotificationSupportState>('unsupported');
+
+  const visualizerInitialScrollOptions: Array<{ value: VisualizerInitialScrollPosition; label: string }> = [
+    { value: 'top', label: '先頭から表示する' },
+    { value: 'bottom', label: '末尾から表示する' },
+  ];
 
   $effect(() => {
     configSnapshot = initialConfig;
@@ -240,6 +248,52 @@
                         <option value="right">Right (Split View)</option>
                     </select>
                     <p class="mt-1 text-xs text-gray-500">Controls where the visualizer appears in the History tab.</p>
+                </div>
+
+                <div class="col-span-1 md:col-span-2">
+                  <label class="block text-sm font-medium text-gray-700 mb-1" for="visualizer-initial-scroll-position">ビジュアライザ初期スクロール位置</label>
+                  <select
+                    id="visualizer-initial-scroll-position"
+                    bind:value={globalConfig.visualizerInitialScrollPosition}
+                    class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm transition-shadow"
+                  >
+                    {#each visualizerInitialScrollOptions as option}
+                      <option value={option.value}>{option.label}</option>
+                    {/each}
+                  </select>
+                  <p class="mt-1 text-xs text-gray-500">履歴タブでビジュアライザを開いたときの表示開始位置を選びます。</p>
+                </div>
+
+                <div class="col-span-1 md:col-span-2">
+                  <div class="block text-sm font-medium text-gray-700 mb-2">Result JSON Placement</div>
+                  <div class="space-y-3">
+                    <label class="flex items-start space-x-3 cursor-pointer group">
+                      <input
+                        type="radio"
+                        name="result-json-mode"
+                        value="symlink"
+                        bind:group={globalConfig.resultJsonMode}
+                        class="mt-1 h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500 transition-colors"
+                      />
+                      <div class="flex-1">
+                        <span class="text-sm text-gray-700 font-medium">Symlink</span>
+                        <p class="text-xs text-gray-500 mt-0.5">Creates a symbolic link to the original JSON file (recommended for most environments).</p>
+                      </div>
+                    </label>
+                    <label class="flex items-start space-x-3 cursor-pointer group">
+                      <input
+                        type="radio"
+                        name="result-json-mode"
+                        value="copy"
+                        bind:group={globalConfig.resultJsonMode}
+                        class="mt-1 h-4 w-4 text-indigo-600 border-gray-300 focus:ring-indigo-500 transition-colors"
+                      />
+                      <div class="flex-1">
+                        <span class="text-sm text-gray-700 font-medium">Copy</span>
+                        <p class="text-xs text-gray-500 mt-0.5">Copies the JSON content as a regular file. Use this if symlinks are not supported on your system.</p>
+                      </div>
+                    </label>
+                  </div>
                 </div>
 
                 <div>

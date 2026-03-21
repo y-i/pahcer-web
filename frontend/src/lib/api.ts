@@ -40,9 +40,14 @@ export const DEFAULT_NOTIFICATION_SETTINGS: TestRunNotificationSettings = {
   testRunCompleted: false,
 };
 
+export type ResultJsonMode = 'symlink' | 'copy';
+export type VisualizerInitialScrollPosition = 'top' | 'bottom';
+
 export interface GlobalConfig {
   visualizerPosition: 'left' | 'right';
+  visualizerInitialScrollPosition: VisualizerInitialScrollPosition;
   visualizerUrl?: string;
+  resultJsonMode: ResultJsonMode;
   defaultSeed: number;
   defaultScale: number;
   testRunOptions?: PersistedTestRunOptions;

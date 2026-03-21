@@ -211,6 +211,11 @@ function handleRunExit(event: Extract<RunStreamEvent, { type: 'exit' }>, runId: 
     ...state,
     isRunning: false,
     lastExitCode: event.code,
+    options: {
+      ...state.options,
+      comment: '',
+      tag: '',
+    },
   }));
 
   if (notifyOnCompletion && snapshot.lastNotifiedRunId !== runId) {
@@ -272,6 +277,11 @@ export async function startTestRun(): Promise<void> {
       ...state,
       isRunning: false,
       lastExitCode: null,
+      options: {
+        ...state.options,
+        comment: '',
+        tag: '',
+      },
     }));
     resetNotificationSelection({ testRunCompleted: defaultEnabled });
   }

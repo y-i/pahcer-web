@@ -129,17 +129,10 @@ pub async fn generate_result_csv(
     let history = storage.read_history().await?;
 
     for result in history {
-        let author = result
-            .get("tag")
-            .and_then(|value| value.as_str())
-            .filter(|value| !value.trim().is_empty())
-            .or_else(|| {
-                result
-                    .get("comment")
-                    .and_then(|value| value.as_str())
-                    .filter(|value| !value.trim().is_empty())
-            })
-            .or_else(|| result.get("datetime").and_then(|value| value.as_str()))
+        let author = (!result.tag.trim().is_empty())
+            .then_some(result.tag.as_str())
+            .or_else(|| (!result.comment.trim().is_empty()).then_some(result.comment.as_str()))
+            .or_else(|| (!result.datetime.trim().is_empty()).then_some(result.datetime.as_str()))
             .unwrap_or("unknown")
             .replace(',', " ")
             .replace('"', "")
@@ -147,17 +140,15 @@ pub async fn generate_result_csv(
             .to_string();
 
         let score_map = result
-            .get("details")
-            .and_then(|value| value.as_array())
-            .map(|details| {
-                details.iter().fold(HashMap::new(), |mut map, detail| {
-                    if let Some(seed) = seed_of(detail) {
-                        map.insert(seed, score_of(detail));
-                    }
-                    map
-                })
+            .details
+            .iter()
+            .fold(HashMap::new(), |mut map, detail| {
+                if let Some(seed) = seed_of(detail) {
+                    map.insert(seed, score_of(detail));
+                }
+                map
             })
-            .unwrap_or_default();
+            ;
 
         let mut scores = Vec::with_capacity(seeds.len());
         for seed in &seeds {
@@ -222,7 +213,10 @@ mod tests {
     use tokio::fs;
 
     use crate::{
-        models::{GlobalConfig, LocalConfig, VisualizerPosition},
+        models::{
+            GlobalConfig, LocalConfig, ResultJsonMode, VisualizerInitialScrollPosition,
+            VisualizerPosition,
+        },
         storage::Storage,
     };
 
@@ -268,13 +262,31 @@ mod tests {
         let storage = Storage::new(dir.path()).unwrap();
         fs::create_dir_all(storage.result_dir("100")).await.unwrap();
         fs::write(
-            storage.result_path("100"),
+            storage.additional_path("100"),
             serde_json::json!({
                 "id": "100",
-                "datetime": "2026-03-14T00:00:00Z",
+                "args": ["-c", "memo"],
+                "resultFileName": "result_20260314_151401.json",
+                "avgScore": 15,
+                "avgLogScore": 1,
+                "avgRelativeScore": 80
+            })
+            .to_string(),
+        )
+        .await
+        .unwrap();
+        fs::write(
+            storage.result_path("100"),
+            serde_json::json!({
+                "start_time": "2026-03-14T15:14:01+09:00",
+                "case_count": 2,
+                "total_score": 30,
+                "total_score_log10": 2,
+                "total_relative_score": 160,
+                "max_execution_time": 0.1,
                 "comment": "memo",
-                "tag": "tag1",
-                "details": [
+                "tag_name": "tag1",
+                "cases": [
                     { "seed": 0, "score": 10 },
                     { "seed": 1, "score": 20 }
                 ]
@@ -288,7 +300,9 @@ mod tests {
             &storage,
             &GlobalConfig {
                 visualizer_position: VisualizerPosition::Right,
+                visualizer_initial_scroll_position: VisualizerInitialScrollPosition::Bottom,
                 visualizer_url: Some("https://example.com/vis.html".to_string()),
+                result_json_mode: ResultJsonMode::Symlink,
                 default_seed: 0,
                 default_scale: 1.0,
                 test_run_options: None,
