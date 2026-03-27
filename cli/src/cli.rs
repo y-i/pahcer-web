@@ -13,7 +13,7 @@ use crate::{
 #[derive(Debug, Parser)]
 #[command(name = "pahcer-web", about = "Web UI for pahcer", version)]
 pub struct Cli {
-    #[arg(short = 'd', long = "dir", default_value = ".")]
+    #[arg(short = 'd', long = "dir", default_value = ".", global = true)]
     pub directory: PathBuf,
     #[command(subcommand)]
     pub command: Commands,
@@ -140,6 +140,54 @@ mod tests {
 
         let short = Cli::try_parse_from(["pahcer-web", "-d", "contest", "ui"]).unwrap();
         assert_eq!(short.directory, PathBuf::from("contest"));
+    }
+
+    #[test]
+    fn directory_option_is_accepted_after_ui_subcommand() {
+        let long = Cli::try_parse_from(["pahcer-web", "ui", "--dir", "contest"]).unwrap();
+        assert_eq!(long.directory, PathBuf::from("contest"));
+
+        let short = Cli::try_parse_from(["pahcer-web", "ui", "-d", "contest"]).unwrap();
+        assert_eq!(short.directory, PathBuf::from("contest"));
+    }
+
+    #[test]
+    fn directory_option_is_accepted_after_run_subcommand_without_entering_run_args() {
+        let long =
+            Cli::try_parse_from(["pahcer-web", "run", "--dir", "contest", "-c", "memo"])
+                .unwrap();
+        assert_eq!(long.directory, PathBuf::from("contest"));
+        match long.command {
+            super::Commands::Run(args) => {
+                assert_eq!(args.args, vec!["-c", "memo"]);
+            }
+            _ => panic!("expected run command"),
+        }
+
+        let short =
+            Cli::try_parse_from(["pahcer-web", "run", "-d", "contest", "-c", "memo"])
+                .unwrap();
+        assert_eq!(short.directory, PathBuf::from("contest"));
+        match short.command {
+            super::Commands::Run(args) => {
+                assert_eq!(args.args, vec!["-c", "memo"]);
+            }
+            _ => panic!("expected run command"),
+        }
+    }
+
+    #[test]
+    fn directory_option_after_delegated_run_args_is_left_in_run_args() {
+        let cli =
+            Cli::try_parse_from(["pahcer-web", "run", "-c", "memo", "-d", "contest"])
+                .unwrap();
+        assert_eq!(cli.directory, PathBuf::from("."));
+        match cli.command {
+            super::Commands::Run(args) => {
+                assert_eq!(args.args, vec!["-c", "memo", "-d", "contest"]);
+            }
+            _ => panic!("expected run command"),
+        }
     }
 
     #[test]
