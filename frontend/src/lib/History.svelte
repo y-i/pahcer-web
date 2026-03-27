@@ -1,204 +1,224 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+    import { onMount } from 'svelte';
     import { api, type ConfigResponse, type GlobalConfig } from './api';
 
     let { initialConfig }: { initialConfig: ConfigResponse } = $props();
 
-  let historyData = $state<any[]>([]);
-  let isLoading = $state(true);
-  let error = $state('');
-  let selectedRow = $state<any | null>(null);
-  let expandedRows = $state(new Set<string>());
-  let deletingIds = $state(new Set<string>());
+    let historyData = $state<any[]>([]);
+    let isLoading = $state(true);
+    let error = $state('');
+    let selectedRow = $state<any | null>(null);
+    let expandedRows = $state(new Set<string>());
+    let deletingIds = $state(new Set<string>());
 
-  let visualizerUrl = $state('/visualizer/index.html');
-  let config = $state<GlobalConfig>({
-    visualizerPosition: 'right',
+    let visualizerUrl = $state('/visualizer/index.html');
+    let config = $state<GlobalConfig>({
+        visualizerPosition: 'right',
         visualizerInitialScrollPosition: 'bottom',
-    visualizerUrl: '',
-    resultJsonMode: 'symlink',
-    defaultSeed: 0,
-    defaultScale: 1.0
-  });
+        visualizerUrl: '',
+        resultJsonMode: 'symlink',
+        defaultSeed: 0,
+        defaultScale: 1.0
+    });
 
-  // Visualizer controls
-  let seed = $state(0);
-  let scalePercent = $state(100);
-  
-  // Derived iframeSrc
-  let iframeSrc = $derived.by(() => {
-    if (!selectedRow) return '';
-    const filename = String(seed).padStart(4, '0') + '.txt';
-    const outputUrl = encodeURIComponent(`/api/history/${selectedRow.id}/output/${filename}`);
+    let seed = $state(0);
+    let scalePercent = $state(100);
+    let urlSyncPhase = $state<'loading' | 'restoring' | 'ready'>('loading');
+
+    let iframeSrc = $derived.by(() => {
+        if (!selectedRow) return '';
+        const filename = String(seed).padStart(4, '0') + '.txt';
+        const outputUrl = encodeURIComponent(`/api/history/${selectedRow.id}/output/${filename}`);
         return `${visualizerUrl}?output_url=${outputUrl}&seed=${seed}&initial_scroll=${config.visualizerInitialScrollPosition}`;
-  });
+    });
 
-  let isUpdatingFromHistory = false;
+    onMount(() => {
+        window.addEventListener('popstate', restoreSelectionFromUrl);
 
-  onMount(() => {
-    window.addEventListener('popstate', handlePopState);
-    
-    (async () => {
-      try {
+        (async () => {
+            try {
                 const historyRes = await api.getHistory();
-        historyData = historyRes;
+                historyData = historyRes;
                 config = initialConfig.global;
+                resetVisualizerControls();
+                restoreSelectionFromUrl();
+            } catch (e) {
+                error = 'Failed to load data';
+                console.error(e);
+            } finally {
+                isLoading = false;
+            }
+        })();
 
+        return () => {
+            window.removeEventListener('popstate', restoreSelectionFromUrl);
+        };
+    });
+
+    function getDefaultScalePercent() {
+        return Math.round(config.defaultScale * 100);
+    }
+
+    function resetVisualizerControls() {
         seed = config.defaultSeed;
-        scalePercent = Math.round(config.defaultScale * 100);
-
-        // Initial sync from URL
-        handlePopState();
-      } catch (e) {
-        error = 'Failed to load data';
-        console.error(e);
-      } finally {
-        isLoading = false;
-      }
-    })();
-    
-    return () => {
-        window.removeEventListener('popstate', handlePopState);
-    };
-  });
-
-  function handlePopState() {
-      isUpdatingFromHistory = true;
-      const params = new URLSearchParams(window.location.search);
-      const id = params.get('id');
-      const oldId = selectedRow?.id;
-      
-      if (id) {
-          const row = historyData.find(r => r.id === id);
-          if (row) {
-              selectedRow = row;
-              const seedParam = params.get('seed');
-              if (seedParam) seed = Number(seedParam);
-              const scaleParam = params.get('scale');
-              if (scaleParam) scalePercent = Number(scaleParam);
-          } else {
-              // ID in URL but not in history (maybe deleted?)
-              selectedRow = null;
-          }
-      } else {
-          selectedRow = null;
-      }
-      
-      // Reset flag after a tick to ensure effects triggered by state changes don't overwrite URL immediately
-      setTimeout(() => {
-          isUpdatingFromHistory = false;
-      }, 0);
-  }
-
-  function selectRow(row: any) {
-    selectedRow = row;
-    // Reset to default values from config when opening a new result
-    seed = config.defaultSeed;
-    scalePercent = Math.round(config.defaultScale * 100);
-    // State change will trigger effect to update URL
-  }
-
-  function toggleDetails(row: any, event: Event) {
-    event.stopPropagation();
-    const newSet = new Set(expandedRows);
-    if (newSet.has(row.id)) {
-      newSet.delete(row.id);
-    } else {
-      newSet.add(row.id);
+        scalePercent = getDefaultScalePercent();
     }
-    expandedRows = newSet;
-  }
 
-  async function deleteRow(id: string, event: Event) {
-    event.stopPropagation();
-    if (!window.confirm('Are you sure you want to delete this execution result?')) return;
-    
-    deletingIds.add(id);
-    try {
-        await api.deleteHistory(id);
-        historyData = historyData.filter(r => r.id !== id);
-        if (selectedRow?.id === id) {
+    function parseNumericParam(value: string | null, fallback: number) {
+        if (value === null || value.trim() === '') {
+            return fallback;
+        }
+
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    function markUrlSyncReady() {
+        setTimeout(() => {
+            urlSyncPhase = 'ready';
+        }, 0);
+    }
+
+    function restoreSelectionFromUrl() {
+        urlSyncPhase = 'restoring';
+
+        const params = new URLSearchParams(window.location.search);
+        const id = params.get('id');
+
+        if (!id) {
             selectedRow = null;
+            resetVisualizerControls();
+            markUrlSyncReady();
+            return;
         }
-    } catch (e) {
-        console.error('Failed to delete history:', e);
-        alert('Failed to delete history');
-    } finally {
-        deletingIds.delete(id);
+
+        const row = historyData.find((historyRow) => historyRow.id === id);
+        if (!row) {
+            selectedRow = null;
+            resetVisualizerControls();
+            markUrlSyncReady();
+            return;
+        }
+
+        selectedRow = row;
+        seed = parseNumericParam(params.get('seed'), config.defaultSeed);
+        scalePercent = parseNumericParam(params.get('scale'), getDefaultScalePercent());
+        markUrlSyncReady();
     }
-  }
 
-  // Sync URL when state changes
-  $effect(() => {
-    if (isUpdatingFromHistory) return;
+    function selectRow(row: any) {
+        if (selectedRow?.id === row.id) {
+            return;
+        }
 
-    const url = new URL(window.location.href);
-    const currentId = url.searchParams.get('id');
-    const currentSeed = url.searchParams.get('seed');
-    const currentScale = url.searchParams.get('scale');
+        selectedRow = row;
+        resetVisualizerControls();
+    }
 
-    // Deselected
-    if (!selectedRow) {
-        if (currentId) {
-            url.searchParams.delete('id');
-            url.searchParams.delete('seed');
-            url.searchParams.delete('scale');
+    function closeVisualizer() {
+        if (!selectedRow) {
+            return;
+        }
+
+        selectedRow = null;
+        resetVisualizerControls();
+    }
+
+    function toggleDetails(row: any, event: Event) {
+        event.stopPropagation();
+        const newSet = new Set(expandedRows);
+        if (newSet.has(row.id)) {
+            newSet.delete(row.id);
+        } else {
+            newSet.add(row.id);
+        }
+        expandedRows = newSet;
+    }
+
+    async function deleteRow(id: string, event: Event) {
+        event.stopPropagation();
+        if (!window.confirm('Are you sure you want to delete this execution result?')) return;
+
+        deletingIds.add(id);
+        try {
+            await api.deleteHistory(id);
+            historyData = historyData.filter(r => r.id !== id);
+            if (selectedRow?.id === id) {
+                selectedRow = null;
+            }
+        } catch (e) {
+            console.error('Failed to delete history:', e);
+            alert('Failed to delete history');
+        } finally {
+            deletingIds.delete(id);
+        }
+    }
+
+    $effect(() => {
+        if (urlSyncPhase !== 'ready') return;
+
+        const url = new URL(window.location.href);
+        const currentId = url.searchParams.get('id');
+        const currentSeed = url.searchParams.get('seed');
+        const currentScale = url.searchParams.get('scale');
+
+        if (!selectedRow) {
+            if (currentId || currentSeed || currentScale) {
+                url.searchParams.delete('id');
+                url.searchParams.delete('seed');
+                url.searchParams.delete('scale');
+                history.pushState(null, '', url.toString());
+            }
+            return;
+        }
+
+        const newId = selectedRow.id;
+        const newSeed = String(seed);
+        const newScale = String(scalePercent);
+
+        if (currentId !== newId) {
+            url.searchParams.set('id', newId);
+            url.searchParams.set('seed', newSeed);
+            url.searchParams.set('scale', newScale);
             history.pushState(null, '', url.toString());
+        } else if (currentSeed !== newSeed || currentScale !== newScale) {
+            url.searchParams.set('id', newId);
+            url.searchParams.set('seed', newSeed);
+            url.searchParams.set('scale', newScale);
+            history.replaceState(null, '', url.toString());
         }
-        return;
+    });
+
+    function formatDate(iso: string) {
+        const d = new Date(iso);
+        const padjw = (n: number) => n.toString().padStart(2, '0');
+        return `${d.getFullYear()}/${padjw(d.getMonth() + 1)}/${padjw(d.getDate())} ${padjw(d.getHours())}:${padjw(d.getMinutes())}:${padjw(d.getSeconds())}`;
     }
 
-    // Selected
-    const newId = selectedRow.id;
-    const newSeed = String(seed);
-    const newScale = String(scalePercent);
-
-    if (currentId !== newId) {
-        // Row changed: Push
-        url.searchParams.set('id', newId);
-        url.searchParams.set('seed', newSeed);
-        url.searchParams.set('scale', newScale);
-        history.pushState(null, '', url.toString());
-    } else if (currentSeed !== newSeed || currentScale !== newScale) {
-        // Only params changed: Replace
-        url.searchParams.set('id', newId);
-        url.searchParams.set('seed', newSeed);
-        url.searchParams.set('scale', newScale);
-        history.replaceState(null, '', url.toString());
+    function formatScore(n: number) {
+        return Math.round(n).toLocaleString();
     }
-  });
 
-  function formatDate(iso: string) {
-      const d = new Date(iso);
-      const padjw = (n: number) => n.toString().padStart(2, '0');
-      return `${d.getFullYear()}/${padjw(d.getMonth() + 1)}/${padjw(d.getDate())} ${padjw(d.getHours())}:${padjw(d.getMinutes())}:${padjw(d.getSeconds())}`;
-  }
+    function formatRelative(n: number) {
+        const s = n.toFixed(4);
+        const parts = s.split('.');
+        const intPart = parts[0].padStart(4, ' ');
+        return `${intPart}.${parts[1]}%`;
+    }
 
-  function formatScore(n: number) {
-      return Math.round(n).toLocaleString();
-  }
+    function formatTime(n: number) {
+        return Math.round(n * 1000).toLocaleString();
+    }
 
-  function formatRelative(n: number) {
-      const s = n.toFixed(4);
-      const parts = s.split('.');
-      // Integer part should be padded to 4 chars
-      const intPart = parts[0].padStart(4, ' ');
-      return `${intPart}.${parts[1]}%`;
-  }
-
-  function formatTime(n: number) {
-      return Math.round(n * 1000).toLocaleString();
-  }
-
-  function getACCount(row: any) {
-      if (row.ACcase !== undefined) {
-          return row.ACcase;
-      }
-      if (row.details && Array.isArray(row.details)) {
-          return row.details.filter((r: any) => (Number(r.score) || 0) > 0 && !r.error_message).length;
-      }
-      return 0;
-  }
+    function getACCount(row: any) {
+        if (row.ACcase !== undefined) {
+            return row.ACcase;
+        }
+        if (row.details && Array.isArray(row.details)) {
+            return row.details.filter((r: any) => (Number(r.score) || 0) > 0 && !r.error_message).length;
+        }
+        return 0;
+    }
 </script>
 
 <div class="h-full flex flex-col bg-gray-50 overflow-hidden min-h-0">
@@ -383,7 +403,7 @@
                 </div>
                 <div class="flex-1"></div>
                 <button 
-                    onclick={() => selectedRow = null} 
+                    onclick={closeVisualizer} 
                     class="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors flex-shrink-0"
                     title="Close Visualizer"
                 >
