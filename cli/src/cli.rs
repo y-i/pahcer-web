@@ -13,7 +13,7 @@ use crate::{
 #[derive(Debug, Parser)]
 #[command(name = "pahcer-web", about = "Web UI for pahcer", version)]
 pub struct Cli {
-    #[arg(short = 'C', long, default_value = ".")]
+    #[arg(short = 'd', long = "dir", default_value = ".")]
     pub directory: PathBuf,
     #[command(subcommand)]
     pub command: Commands,
@@ -114,6 +114,7 @@ async fn bridge_run_command(port: u16, args: Vec<String>) -> Result<ExitCode, Ap
 mod tests {
     use super::Cli;
     use clap::{CommandFactory, Parser};
+    use std::path::PathBuf;
 
     #[test]
     fn clap_definition_is_valid() {
@@ -130,5 +131,20 @@ mod tests {
             }
             _ => panic!("expected run command"),
         }
+    }
+
+    #[test]
+    fn directory_option_accepts_dir_flags() {
+        let long = Cli::try_parse_from(["pahcer-web", "--dir", "contest", "ui"]).unwrap();
+        assert_eq!(long.directory, PathBuf::from("contest"));
+
+        let short = Cli::try_parse_from(["pahcer-web", "-d", "contest", "ui"]).unwrap();
+        assert_eq!(short.directory, PathBuf::from("contest"));
+    }
+
+    #[test]
+    fn directory_option_defaults_to_current_directory() {
+        let cli = Cli::try_parse_from(["pahcer-web", "ui"]).unwrap();
+        assert_eq!(cli.directory, PathBuf::from("."));
     }
 }

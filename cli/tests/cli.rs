@@ -8,5 +8,11 @@ fn help_lists_primary_subcommands() {
     command
         .assert()
         .success()
-        .stdout(predicates::str::contains("ui").and(predicates::str::contains("run")));
+        .stdout(
+            predicates::str::contains("ui")
+                .and(predicates::str::contains("run"))
+                .and(predicates::str::contains("-d, --dir <DIRECTORY>"))
+                .and(predicates::str::contains("--directory").not())
+                .and(predicates::str::contains("-C").not()),
+        );
 }
