@@ -156,6 +156,20 @@
         expandedRows = newSet;
     }
 
+    function openVisualizerForSeed(row: any, detail: any, event: Event) {
+        event.stopPropagation();
+
+        const nextSeed = Number(detail.seed);
+        const resolvedSeed = Number.isFinite(nextSeed) ? nextSeed : config.defaultSeed;
+
+        if (selectedRow?.id !== row.id) {
+            selectedRow = row;
+            scalePercent = getDefaultScalePercent();
+        }
+
+        seed = resolvedSeed;
+    }
+
     async function deleteRow(id: string, event: Event) {
         event.stopPropagation();
         if (!window.confirm('Are you sure you want to delete this execution result?')) return;
@@ -240,20 +254,6 @@
         })();
     });
 
-        return `${intPart}.${parts[1]}%`;
-    }
-
-    function formatTime(n: number) {
-        return Math.round(n * 1000).toLocaleString();
-    }
-
-    function getACCount(row: any) {
-        if (row.ACcase !== undefined) {
-            return row.ACcase;
-        }
-        if (row.details && Array.isArray(row.details)) {
-            return row.details.filter((r: any) => (Number(r.score) || 0) > 0 && !r.error_message).length;
-        }
     function formatDate(iso: string) {
         const d = new Date(iso);
         const padjw = (n: number) => n.toString().padStart(2, '0');
@@ -279,7 +279,25 @@
         const s = n.toFixed(4);
         const parts = s.split('.');
         const intPart = parts[0].padStart(4, ' ');
+        return `${intPart}.${parts[1]}%`;
+    }
+
+    function formatTime(n: number) {
+        return Math.round(n * 1000).toLocaleString();
+    }
+
+    function getACCount(row: any) {
+        if (row.ACcase !== undefined) {
+            return row.ACcase;
+        }
+        if (row.details && Array.isArray(row.details)) {
+            return row.details.filter((r: any) => (Number(r.score) || 0) > 0 && !r.error_message).length;
+        }
         return 0;
+    }
+
+    function hasProjectVisualizerUrl() {
+        return (localConfig.visualizerUrl ?? '').trim().length > 0;
     }
 </script>
 
@@ -295,10 +313,6 @@
   {:else if error}
     <div class="flex-1 flex items-center justify-center text-red-500">{error}</div>
   {:else}
-
-    function hasProjectVisualizerUrl() {
-        return (localConfig.visualizerUrl ?? '').trim().length > 0;
-    }
     <div class="flex-1 flex overflow-hidden p-6 max-w-none w-full min-h-0">
       <!-- List View -->
       <div class="{selectedRow ? 'w-[calc(50%-0.75rem)]' : 'w-full'} 
@@ -409,7 +423,15 @@
                                                                 <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 font-mono text-right whitespace-pre">{detail.relative_score !== undefined ? formatRelative(Number(detail.relative_score)) : '-'}</td>
                                                                 <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 font-mono text-right">{detail.execution_time !== undefined ? formatTime(Number(detail.execution_time)) : (detail.time !== undefined ? formatTime(Number(detail.time)) : '-')}</td>
                                                                 <td class="px-4 py-2 text-sm text-red-600 font-mono">{detail.error_message || ''}</td>
-                                                                <td class="px-4 py-2"></td>
+                                                                <td class="px-4 py-2 text-right">
+                                                                    <button
+                                                                        onclick={(event) => openVisualizerForSeed(row, detail, event)}
+                                                                        class="inline-flex items-center rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-100"
+                                                                        title="Open this seed in visualizer"
+                                                                    >
+                                                                        Visualize
+                                                                    </button>
+                                                                </td>
                                                             </tr>
                                                         {/each}
                                                     </tbody>
