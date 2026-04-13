@@ -349,20 +349,24 @@ async fn run_pahcer(
 ) -> Result<Response<Body>, AppError> {
     let _guard = state.run_lock.lock().await;
 
+    let run_base_dir = request.directory.unwrap_or_else(|| state.base_dir.clone());
+    let run_storage = Storage::new(run_base_dir.clone())?;
     let mut args = request.args;
     ensure_json_flag(&mut args);
     let (comment, tag) = extract_comment_tag(&args);
     let run_started_at = Utc::now();
     let timestamp = run_started_at.timestamp().to_string();
-    let result_dir = state.storage.result_dir(&timestamp);
+    let result_dir = run_storage.result_dir(&timestamp);
     let output_dir = result_dir.join("output");
     fs::create_dir_all(&output_dir).await?;
-    let existing_result_files = state.storage.list_pahcer_result_files().await?;
+    let existing_result_files = run_storage.list_pahcer_result_files().await?;
 
     let (sender, receiver) = mpsc::channel::<Result<Bytes, Infallible>>(64);
     let job_id = Utc::now().timestamp_millis().to_string();
     let state_clone = state.clone();
     let request = RunTaskRequest {
+        base_dir: run_base_dir,
+        storage: run_storage,
         args,
         comment,
         tag,
@@ -396,6 +400,8 @@ async fn run_pahcer(
 }
 
 struct RunTaskRequest {
+    base_dir: PathBuf,
+    storage: Storage,
     args: Vec<String>,
     comment: String,
     tag: String,
@@ -420,12 +426,12 @@ async fn run_pahcer_task(
         output_file: None,
         result: None,
     };
-    state.storage.save_job(job).await?;
+    request.storage.save_job(job).await?;
 
     let mut child = Command::new(&state.pahcer_program)
         .arg("run")
         .args(&request.args)
-        .current_dir(&state.base_dir)
+        .current_dir(&request.base_dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -456,10 +462,10 @@ async fn run_pahcer_task(
         .map_err(|error| AppError::Internal(error.to_string()))??;
 
     let all_output = log_buffer.lock().await.clone();
-    let global_config = state.storage.get_global_config().await?;
+    let global_config = request.storage.get_global_config().await?;
 
     let finalize_result = async {
-        let Some((result_file_name, pahcer_result)) = state
+        let Some((result_file_name, pahcer_result)) = request
             .storage
             .find_pahcer_result_for_run(
                 &request.existing_result_files,
@@ -478,7 +484,7 @@ async fn run_pahcer_task(
             return Ok(None);
         }
 
-        state
+        request
             .storage
             .materialize_result_json(
                 &request.timestamp,
@@ -486,7 +492,7 @@ async fn run_pahcer_task(
                 global_config.result_json_mode,
             )
             .await?;
-        copy_output_files(&state.base_dir, &request.output_dir).await?;
+        copy_output_files(&request.base_dir, &request.output_dir).await?;
 
         let additional = AdditionalResultMetadata {
             id: request.timestamp.clone(),
@@ -503,7 +509,7 @@ async fn run_pahcer_task(
             ),
             extra: Default::default(),
         };
-        state
+        request
             .storage
             .save_additional_result(&request.timestamp, &additional)
             .await?;
@@ -542,7 +548,7 @@ async fn run_pahcer_task(
                     .collect(),
                 extra: Default::default(),
             };
-            state
+            request
                 .storage
                 .save_job(JobMetadata {
                     id: request.job_id,
@@ -560,12 +566,12 @@ async fn run_pahcer_task(
                 .await?;
         }
         Ok(None) => {
-            state.storage.delete_job(&request.job_id).await?;
-            state.storage.delete_result(&request.timestamp).await?;
+            request.storage.delete_job(&request.job_id).await?;
+            request.storage.delete_result(&request.timestamp).await?;
         }
         Err(error) => {
             let error_message = error.to_string();
-            cleanup_failed_run(&state, &request, &all_output, &error_message).await?;
+            cleanup_failed_run(&request, &all_output, &error_message).await?;
             return Err(error);
         }
     }
@@ -746,13 +752,12 @@ async fn copy_output_files(base_dir: &Path, output_dir: &Path) -> Result<(), App
 }
 
 async fn cleanup_failed_run(
-    state: &AppState,
     request: &RunTaskRequest,
     logs: &str,
     error_message: &str,
 ) -> Result<(), AppError> {
-    state.storage.delete_result(&request.timestamp).await?;
-    state
+    request.storage.delete_result(&request.timestamp).await?;
+    request
         .storage
         .save_job(JobMetadata {
             id: request.job_id.clone(),
