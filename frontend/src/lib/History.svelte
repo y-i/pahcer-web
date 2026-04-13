@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { api, type ConfigResponse, type GlobalConfig } from './api';
+    import { api, type ConfigResponse, type GlobalConfig, type LocalConfig } from './api';
+    import { navigateToTab } from './navigation';
 
     let { initialConfig }: { initialConfig: ConfigResponse } = $props();
 
@@ -20,10 +21,16 @@
         defaultSeed: 0,
         defaultScale: 1.0
     });
+    let localConfig = $state<LocalConfig>({
+        visualizerUrl: ''
+    });
 
     let seed = $state(0);
     let scalePercent = $state(100);
     let urlSyncPhase = $state<'loading' | 'restoring' | 'ready'>('loading');
+    let visualizerStatus = $state<'idle' | 'checking' | 'ready' | 'missing'>('idle');
+    let visualizerStatusError = $state('');
+    let visualizerCheckToken = 0;
 
     let iframeSrc = $derived.by(() => {
         if (!selectedRow) return '';
@@ -40,6 +47,7 @@
                 const historyRes = await api.getHistory();
                 historyData = historyRes;
                 config = initialConfig.global;
+                localConfig = { ...localConfig, ...initialConfig.local };
                 resetVisualizerControls();
                 restoreSelectionFromUrl();
             } catch (e) {
@@ -124,6 +132,19 @@
         resetVisualizerControls();
     }
 
+    function goToProjectVisualizerSettings() {
+        navigateToTab('settings');
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                const input = document.getElementById('project-visualizer-url');
+                if (input instanceof HTMLInputElement) {
+                    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    input.focus();
+                }
+            });
+        });
+    }
+
     function toggleDetails(row: any, event: Event) {
         event.stopPropagation();
         const newSet = new Set(expandedRows);
@@ -203,6 +224,36 @@
         const s = n.toFixed(4);
         const parts = s.split('.');
         const intPart = parts[0].padStart(4, ' ');
+    $effect(() => {
+        const selectedRowId = selectedRow?.id;
+
+        if (!selectedRowId) {
+            visualizerStatus = 'idle';
+            visualizerStatusError = '';
+            return;
+        }
+
+        const currentToken = ++visualizerCheckToken;
+        visualizerStatus = 'checking';
+        visualizerStatusError = '';
+
+        void (async () => {
+            try {
+                const { exists } = await api.getVisualizerStatus();
+                if (currentToken !== visualizerCheckToken) {
+                    return;
+                }
+                visualizerStatus = exists ? 'ready' : 'missing';
+            } catch (e) {
+                if (currentToken !== visualizerCheckToken) {
+                    return;
+                }
+                visualizerStatus = 'missing';
+                visualizerStatusError = e instanceof Error ? e.message : 'Failed to check visualizer status';
+            }
+        })();
+    });
+
         return `${intPart}.${parts[1]}%`;
     }
 
@@ -244,6 +295,10 @@
                 onclick={() => api.getHistory().then(res => historyData = res)} 
                 class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
             >
+
+    function hasProjectVisualizerUrl() {
+        return (localConfig.visualizerUrl ?? '').trim().length > 0;
+    }
                 Refresh
             </button>
         </div>
@@ -381,26 +436,38 @@
         {#if selectedRow}
             <div class="px-4 py-3 border-b border-gray-200 bg-white flex items-center space-x-6 shadow-sm z-10 min-w-0 flex-shrink-0">
                 <span class="text-xs font-bold text-gray-400 uppercase tracking-wider flex-shrink-0">Visualizer</span>
-                <div class="h-4 w-px bg-gray-300 flex-shrink-0"></div>
-                <div class="flex items-center space-x-3 min-w-0">
-                    <label class="text-sm font-medium text-gray-600 whitespace-nowrap" for="history-visualizer-seed">Seed</label>
-                    <input 
-                        id="history-visualizer-seed"
-                        type="number" 
-                        bind:value={seed} 
-                        class="w-20 px-2 py-1 bg-gray-50 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" 
-                    />
-                </div>
-                <div class="flex items-center space-x-3 min-w-0">
-                    <label class="text-sm font-medium text-gray-600 whitespace-nowrap" for="history-visualizer-scale">Scale (%)</label>
-                    <input 
-                        id="history-visualizer-scale"
-                        type="number" 
-                        step="5"
-                        bind:value={scalePercent} 
-                        class="w-16 px-2 py-1 bg-gray-50 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" 
-                    />
-                </div>
+                {#if visualizerStatus === 'ready'}
+                    <div class="h-4 w-px bg-gray-300 flex-shrink-0"></div>
+                    <div class="flex items-center space-x-3 min-w-0">
+                        <label class="text-sm font-medium text-gray-600 whitespace-nowrap" for="history-visualizer-seed">Seed</label>
+                        <input 
+                            id="history-visualizer-seed"
+                            type="number" 
+                            bind:value={seed} 
+                            class="w-20 px-2 py-1 bg-gray-50 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" 
+                        />
+                    </div>
+                    <div class="flex items-center space-x-3 min-w-0">
+                        <label class="text-sm font-medium text-gray-600 whitespace-nowrap" for="history-visualizer-scale">Scale (%)</label>
+                        <input 
+                            id="history-visualizer-scale"
+                            type="number" 
+                            step="5"
+                            bind:value={scalePercent} 
+                            class="w-16 px-2 py-1 bg-gray-50 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" 
+                        />
+                    </div>
+                {:else if visualizerStatus === 'checking'}
+                    <div class="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
+                        <svg class="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span>ビジュアライザを確認中</span>
+                    </div>
+                {:else if visualizerStatus === 'missing'}
+                    <span class="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">Project Settings の確認が必要です</span>
+                {/if}
                 <div class="flex-1"></div>
                 <button 
                     onclick={closeVisualizer} 
@@ -411,12 +478,58 @@
                 </button>
             </div>
             <div class="flex-1 relative bg-gray-50 min-w-0 overflow-hidden">
-                <iframe 
-                    title="Visualizer"
-                    src={iframeSrc} 
-                    class="border-none"
-                    style="width: {10000 / scalePercent}%; height: {10000 / scalePercent}%; transform: scale({scalePercent / 100}); transform-origin: 0 0;"
-                ></iframe>
+                {#if visualizerStatus === 'ready'}
+                    <iframe 
+                        title="Visualizer"
+                        src={iframeSrc} 
+                        class="border-none"
+                        style="width: {10000 / scalePercent}%; height: {10000 / scalePercent}%; transform: scale({scalePercent / 100}); transform-origin: 0 0;"
+                    ></iframe>
+                {:else if visualizerStatus === 'checking'}
+                    <div class="flex h-full items-center justify-center">
+                        <div class="inline-flex items-center gap-3 rounded-2xl border border-gray-200 bg-white px-5 py-4 text-sm text-gray-600 shadow-sm">
+                            <svg class="h-5 w-5 animate-spin text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span>ビジュアライザファイルの有無を確認しています...</span>
+                        </div>
+                    </div>
+                {:else}
+                    <div class="flex h-full items-center justify-center p-6">
+                        <div class="w-full max-w-lg rounded-3xl border border-amber-200 bg-white p-8 text-center shadow-lg shadow-amber-100/50">
+                            <div class="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+                                <svg class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                            </div>
+                            {#if hasProjectVisualizerUrl()}
+                                <h3 class="text-lg font-bold text-gray-900">ビジュアライザファイルがまだ配置されていません</h3>
+                                <p class="mt-3 text-sm leading-6 text-gray-600">
+                                    Project Settings の Project Visualizer URL は設定済みですが、ローカルのビジュアライザファイルが見つかりません。
+                                    設定タブで URL を確認して Project Settings を保存し直すと、visualizer を再ダウンロードできます。
+                                </p>
+                            {:else}
+                                <h3 class="text-lg font-bold text-gray-900">Project Settings にビジュアライザ URL を設定してください</h3>
+                                <p class="mt-3 text-sm leading-6 text-gray-600">
+                                    評価履歴から visualizer を開くには、Project Settings の Project Visualizer URL を入力して保存し、
+                                    visualizer 本体をダウンロードする必要があります。
+                                </p>
+                            {/if}
+                            {#if visualizerStatusError}
+                                <p class="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-left text-xs text-amber-800">{visualizerStatusError}</p>
+                            {/if}
+                            <div class="mt-6 flex justify-center">
+                                <button
+                                    onclick={goToProjectVisualizerSettings}
+                                    class="inline-flex items-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700"
+                                >
+                                    設定へ移動
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                {/if}
             </div>
         {/if}
       </div>
