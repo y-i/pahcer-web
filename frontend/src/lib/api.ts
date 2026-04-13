@@ -42,6 +42,7 @@ export const DEFAULT_NOTIFICATION_SETTINGS: TestRunNotificationSettings = {
 
 export type ResultJsonMode = 'symlink' | 'copy';
 export type VisualizerInitialScrollPosition = 'top' | 'bottom';
+export type HistoryScoreDisplayFormat = 'plain' | 'scientific';
 
 export interface GlobalConfig {
   visualizerPosition: 'left' | 'right';
@@ -57,6 +58,7 @@ export interface GlobalConfig {
 export interface LocalConfig {
   visualizerUrl?: string;
   defaultScoreType?: 'raw' | 'max' | 'min' | 'rank_max' | 'rank_min';
+  historyScoreDisplayFormat?: HistoryScoreDisplayFormat;
   inputParamNames?: string;
 }
 

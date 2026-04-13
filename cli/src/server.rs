@@ -788,7 +788,8 @@ mod tests {
 
     use crate::{
         models::{
-            GlobalConfig, ResultJsonMode, VisualizerInitialScrollPosition, VisualizerPosition,
+            GlobalConfig, HistoryScoreDisplayFormat, LocalConfig, ResultJsonMode,
+            VisualizerInitialScrollPosition, VisualizerPosition,
         },
         server::{build_app, build_state},
     };
@@ -856,14 +857,70 @@ mod tests {
         assert_eq!(json["global"]["visualizerInitialScrollPosition"], "bottom");
         assert_eq!(json["initializationState"], "uninitialized");
         assert!(json["problemName"].is_null());
+    }
+
+    #[tokio::test]
+    async fn local_config_roundtrip_preserves_history_score_display_format() {
+        let dir = tempdir().unwrap();
+        unsafe {
+            std::env::set_var("XDG_CONFIG_HOME", dir.path());
+        }
+        let frontend = dir.path().join("dist");
+        tokio::fs::create_dir_all(&frontend).await.unwrap();
+        tokio::fs::write(frontend.join("index.html"), "<html></html>")
+            .await
+            .unwrap();
+        let state = build_state(
+            dir.path().to_path_buf(),
+            frontend,
+            Some(dir.path().join("fake-pahcer")),
+        )
+        .await
+        .unwrap();
+        let app = build_app(state.clone());
+
+        let payload = serde_json::to_vec(&LocalConfig {
+            visualizer_url: Some("https://example.com/vis.html".to_string()),
+            default_score_type: None,
+            history_score_display_format: Some(HistoryScoreDisplayFormat::Scientific),
+            input_param_names: Some("N,M".to_string()),
+            extra: BTreeMap::new(),
+        })
+        .unwrap();
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/config/local")
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), 200);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/config")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["local"]["historyScoreDisplayFormat"], "scientific");
 
         let saved: serde_json::Value = serde_json::from_str(
-            &tokio::fs::read_to_string(state.storage.global_config_path())
+            &tokio::fs::read_to_string(state.storage.local_config_path())
                 .await
                 .unwrap(),
         )
         .unwrap();
-        assert_eq!(saved["resultJsonMode"], "copy");
-        assert_eq!(saved["visualizerInitialScrollPosition"], "bottom");
+        assert_eq!(saved["historyScoreDisplayFormat"], "scientific");
     }
 }

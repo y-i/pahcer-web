@@ -210,20 +210,6 @@
         }
     });
 
-    function formatDate(iso: string) {
-        const d = new Date(iso);
-        const padjw = (n: number) => n.toString().padStart(2, '0');
-        return `${d.getFullYear()}/${padjw(d.getMonth() + 1)}/${padjw(d.getDate())} ${padjw(d.getHours())}:${padjw(d.getMinutes())}:${padjw(d.getSeconds())}`;
-    }
-
-    function formatScore(n: number) {
-        return Math.round(n).toLocaleString();
-    }
-
-    function formatRelative(n: number) {
-        const s = n.toFixed(4);
-        const parts = s.split('.');
-        const intPart = parts[0].padStart(4, ' ');
     $effect(() => {
         const selectedRowId = selectedRow?.id;
 
@@ -268,6 +254,31 @@
         if (row.details && Array.isArray(row.details)) {
             return row.details.filter((r: any) => (Number(r.score) || 0) > 0 && !r.error_message).length;
         }
+    function formatDate(iso: string) {
+        const d = new Date(iso);
+        const padjw = (n: number) => n.toString().padStart(2, '0');
+        return `${d.getFullYear()}/${padjw(d.getMonth() + 1)}/${padjw(d.getDate())} ${padjw(d.getHours())}:${padjw(d.getMinutes())}:${padjw(d.getSeconds())}`;
+    }
+
+    function usesScientificScoreDisplay() {
+        return localConfig.historyScoreDisplayFormat === 'scientific';
+    }
+
+    function formatHistoryScore(n: number) {
+        const rounded = Math.round(n);
+        if (usesScientificScoreDisplay()) {
+            if (rounded === 0) {
+                return '0';
+            }
+            return rounded.toExponential(2);
+        }
+        return rounded.toLocaleString();
+    }
+
+    function formatRelative(n: number) {
+        const s = n.toFixed(4);
+        const parts = s.split('.');
+        const intPart = parts[0].padStart(4, ' ');
         return 0;
     }
 </script>
@@ -284,6 +295,10 @@
   {:else if error}
     <div class="flex-1 flex items-center justify-center text-red-500">{error}</div>
   {:else}
+
+    function hasProjectVisualizerUrl() {
+        return (localConfig.visualizerUrl ?? '').trim().length > 0;
+    }
     <div class="flex-1 flex overflow-hidden p-6 max-w-none w-full min-h-0">
       <!-- List View -->
       <div class="{selectedRow ? 'w-[calc(50%-0.75rem)]' : 'w-full'} 
@@ -295,10 +310,6 @@
                 onclick={() => api.getHistory().then(res => historyData = res)} 
                 class="inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md text-indigo-700 bg-indigo-100 hover:bg-indigo-200 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-colors"
             >
-
-    function hasProjectVisualizerUrl() {
-        return (localConfig.visualizerUrl ?? '').trim().length > 0;
-    }
                 Refresh
             </button>
         </div>
@@ -319,7 +330,7 @@
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-200">
-                    {#each historyData as row}
+                    {#each historyData as row (row.id)}
                         <tr 
                             class="group hover:bg-indigo-50/50 cursor-pointer transition-colors duration-150 ease-in-out {selectedRow === row ? 'bg-indigo-50' : ''}"
                             onclick={() => selectRow(row)}
@@ -339,7 +350,7 @@
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono">{formatDate(row.datetime)}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right">{getACCount(row)}/{row.cases}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-mono font-medium text-right">{formatScore(row.avgScore)}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-mono font-medium text-right">{formatHistoryScore(row.avgScore)}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right">{row.avgLogScore.toFixed(3)}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right whitespace-pre">{row.avgRelativeScore !== undefined ? formatRelative(row.avgRelativeScore) : '-'}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right">{Math.round(row.maxTime)}ms</td>
@@ -391,10 +402,10 @@
                                                         </tr>
                                                     </thead>
                                                     <tbody class="divide-y divide-gray-200 bg-white">
-                                                        {#each row.details.slice().sort((a: any, b: any) => (Number(a.seed) || 0) - (Number(b.seed) || 0)) as detail}
+                                                        {#each row.details.slice().sort((a: any, b: any) => (Number(a.seed) || 0) - (Number(b.seed) || 0)) as detail (`${row.id}-${detail.seed}`)}
                                                             <tr class="hover:bg-gray-50">
                                                                 <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900 font-mono">{detail.seed}</td>
-                                                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900 font-mono font-medium text-right">{formatScore(Number(detail.score) || 0)}</td>
+                                                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900 font-mono font-medium text-right">{formatHistoryScore(Number(detail.score) || 0)}</td>
                                                                 <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 font-mono text-right whitespace-pre">{detail.relative_score !== undefined ? formatRelative(Number(detail.relative_score)) : '-'}</td>
                                                                 <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 font-mono text-right">{detail.execution_time !== undefined ? formatTime(Number(detail.execution_time)) : (detail.time !== undefined ? formatTime(Number(detail.time)) : '-')}</td>
                                                                 <td class="px-4 py-2 text-sm text-red-600 font-mono">{detail.error_message || ''}</td>

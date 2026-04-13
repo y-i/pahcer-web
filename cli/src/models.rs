@@ -81,6 +81,13 @@ pub enum ScoreType {
     RankMin,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum HistoryScoreDisplayFormat {
+    Plain,
+    Scientific,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TestRunOptions {
@@ -135,6 +142,7 @@ impl Default for GlobalConfig {
 pub struct LocalConfig {
     pub visualizer_url: Option<String>,
     pub default_score_type: Option<ScoreType>,
+    pub history_score_display_format: Option<HistoryScoreDisplayFormat>,
     pub input_param_names: Option<String>,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
