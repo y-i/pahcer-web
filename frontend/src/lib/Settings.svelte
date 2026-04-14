@@ -43,7 +43,8 @@
   });
 
   let localConfig = $state<LocalConfig>({
-    visualizerUrl: ''
+    visualizerUrl: '',
+    historyScoreDisplayFormat: 'plain',
   });
 
   let initialGlobalConfig = $state<GlobalConfig | null>(null);
@@ -60,8 +61,8 @@
     { value: 'top', label: '先頭から表示する' },
     { value: 'bottom', label: '末尾から表示する' },
   ];
-  const historyScoreDisplayOptions: Array<{ value: '' | HistoryScoreDisplayFormat; label: string }> = [
-    { value: '', label: '通常表示' },
+  const historyScoreDisplayOptions: Array<{ value: HistoryScoreDisplayFormat; label: string }> = [
+    { value: 'plain', label: '通常表示' },
     { value: 'scientific', label: '指数表示' },
   ];
 
@@ -85,7 +86,11 @@
         testRunCompleted: initialConfig.global.notifications?.testRunCompleted ?? globalConfig.notifications!.testRunCompleted,
       },
     };
-    localConfig = { ...localConfig, ...initialConfig.local };
+    localConfig = {
+      ...localConfig,
+      ...initialConfig.local,
+      historyScoreDisplayFormat: initialConfig.local.historyScoreDisplayFormat ?? 'plain',
+    };
     syncSavedTestRunDefaults({
       shuffle: initialConfig.global.testRunOptions?.shuffle ?? DEFAULT_TEST_RUN_OPTIONS.shuffle,
       settingFile: initialConfig.global.testRunOptions?.settingFile ?? DEFAULT_TEST_RUN_OPTIONS.settingFile,
@@ -433,7 +438,7 @@
                 bind:value={localConfig.historyScoreDisplayFormat}
                 class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm transition-shadow"
               >
-                {#each historyScoreDisplayOptions as option (option.value || 'plain')}
+                {#each historyScoreDisplayOptions as option (option.value)}
                   <option value={option.value}>{option.label}</option>
                 {/each}
               </select>

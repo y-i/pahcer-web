@@ -879,48 +879,54 @@ mod tests {
         .unwrap();
         let app = build_app(state.clone());
 
-        let payload = serde_json::to_vec(&LocalConfig {
-            visualizer_url: Some("https://example.com/vis.html".to_string()),
-            default_score_type: None,
-            history_score_display_format: Some(HistoryScoreDisplayFormat::Scientific),
-            input_param_names: Some("N,M".to_string()),
-            extra: BTreeMap::new(),
-        })
-        .unwrap();
-
-        let response = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/api/config/local")
-                    .header("content-type", "application/json")
-                    .body(Body::from(payload))
-                    .unwrap(),
-            )
-            .await
+        for (format, expected) in [
+            (HistoryScoreDisplayFormat::Plain, "plain"),
+            (HistoryScoreDisplayFormat::Scientific, "scientific"),
+        ] {
+            let payload = serde_json::to_vec(&LocalConfig {
+                visualizer_url: Some("https://example.com/vis.html".to_string()),
+                default_score_type: None,
+                history_score_display_format: Some(format),
+                input_param_names: Some("N,M".to_string()),
+                extra: BTreeMap::new(),
+            })
             .unwrap();
-        assert_eq!(response.status(), 200);
 
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/config")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        let body = response.into_body().collect().await.unwrap().to_bytes();
-        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(json["local"]["historyScoreDisplayFormat"], "scientific");
-
-        let saved: serde_json::Value = serde_json::from_str(
-            &tokio::fs::read_to_string(state.storage.local_config_path())
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/config/local")
+                        .header("content-type", "application/json")
+                        .body(Body::from(payload))
+                        .unwrap(),
+                )
                 .await
-                .unwrap(),
-        )
-        .unwrap();
-        assert_eq!(saved["historyScoreDisplayFormat"], "scientific");
+                .unwrap();
+            assert_eq!(response.status(), 200);
+
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/config")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            let body = response.into_body().collect().await.unwrap().to_bytes();
+            let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(json["local"]["historyScoreDisplayFormat"], expected);
+
+            let saved: serde_json::Value = serde_json::from_str(
+                &tokio::fs::read_to_string(state.storage.local_config_path())
+                    .await
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(saved["historyScoreDisplayFormat"], expected);
+        }
     }
 }
