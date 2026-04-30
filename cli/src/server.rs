@@ -320,6 +320,8 @@ async fn download_visualizer(
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| AppError::BadRequest("URL is required".to_string()))?;
 
+    reject_excluded_visualizer_url(url)?;
+
     let destination = state.storage.visualizer_dir();
     match fs::remove_dir_all(&destination).await {
         Ok(()) => {}
@@ -328,6 +330,19 @@ async fn download_visualizer(
     }
     download_recursive(&state.client, url, &destination).await?;
     Ok(Json(json!({ "success": true })))
+}
+
+fn reject_excluded_visualizer_url(url: &str) -> Result<(), AppError> {
+    if let Ok(parsed_url) = url::Url::parse(url)
+        && parsed_url.scheme() == "https"
+        && parsed_url.host_str() == Some("atcoder.jp")
+    {
+        return Err(AppError::BadRequest(format!(
+            "Refusing to download visualizer page from {url}"
+        )));
+    }
+
+    Ok(())
 }
 
 async fn download_analysis(State(state): State<AppState>) -> Result<Json<Value>, AppError> {
