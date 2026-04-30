@@ -156,11 +156,19 @@
         expandedRows = newSet;
     }
 
+    function resolveDetailSeed(detail: any) {
+        const nextSeed = Number(detail.seed);
+        return Number.isFinite(nextSeed) ? nextSeed : config.defaultSeed;
+    }
+
+    function isActiveSeed(row: any, detail: any) {
+        return selectedRow?.id === row.id && seed === resolveDetailSeed(detail);
+    }
+
     function openVisualizerForSeed(row: any, detail: any, event: Event) {
         event.stopPropagation();
 
-        const nextSeed = Number(detail.seed);
-        const resolvedSeed = Number.isFinite(nextSeed) ? nextSeed : config.defaultSeed;
+        const resolvedSeed = resolveDetailSeed(detail);
 
         if (selectedRow?.id !== row.id) {
             selectedRow = row;
@@ -412,26 +420,26 @@
                                                             <th scope="col" class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Relative Score</th>
                                                             <th scope="col" class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Time (ms)</th>
                                                             <th scope="col" class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Error</th>
-                                                            <th scope="col" class="px-4 py-2"></th>
                                                         </tr>
                                                     </thead>
                                                     <tbody class="divide-y divide-gray-200 bg-white">
                                                         {#each row.details.slice().sort((a: any, b: any) => (Number(a.seed) || 0) - (Number(b.seed) || 0)) as detail (`${row.id}-${detail.seed}`)}
                                                             <tr class="hover:bg-gray-50">
-                                                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900 font-mono">{detail.seed}</td>
+                                                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900 font-mono">
+                                                                    <button
+                                                                        type="button"
+                                                                        onclick={(event) => openVisualizerForSeed(row, detail, event)}
+                                                                        class="inline-flex items-center rounded-md px-2 py-1 font-semibold underline decoration-indigo-300 underline-offset-2 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-1 hover:text-indigo-700 hover:decoration-indigo-500 {isActiveSeed(row, detail) ? 'bg-indigo-100 text-indigo-700 decoration-indigo-500' : 'text-indigo-600'}"
+                                                                        title="Open this seed in visualizer"
+                                                                        aria-label={`Open seed ${detail.seed} in visualizer`}
+                                                                    >
+                                                                        {detail.seed}
+                                                                    </button>
+                                                                </td>
                                                                 <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900 font-mono font-medium text-right">{formatHistoryScore(Number(detail.score) || 0)}</td>
                                                                 <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 font-mono text-right whitespace-pre">{detail.relative_score !== undefined ? formatRelative(Number(detail.relative_score)) : '-'}</td>
                                                                 <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 font-mono text-right">{detail.execution_time !== undefined ? formatTime(Number(detail.execution_time)) : (detail.time !== undefined ? formatTime(Number(detail.time)) : '-')}</td>
                                                                 <td class="px-4 py-2 text-sm text-red-600 font-mono">{detail.error_message || ''}</td>
-                                                                <td class="px-4 py-2 text-right">
-                                                                    <button
-                                                                        onclick={(event) => openVisualizerForSeed(row, detail, event)}
-                                                                        class="inline-flex items-center rounded-md border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 transition hover:border-indigo-300 hover:bg-indigo-100"
-                                                                        title="Open this seed in visualizer"
-                                                                    >
-                                                                        Visualize
-                                                                    </button>
-                                                                </td>
                                                             </tr>
                                                         {/each}
                                                     </tbody>
