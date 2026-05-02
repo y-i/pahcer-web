@@ -67,7 +67,7 @@ fn resolve_directory_for_server(directory: PathBuf) -> Result<PathBuf, AppError>
         std::env::current_dir()?.join(directory)
     };
 
-    Ok(absolute.canonicalize().unwrap_or(absolute))
+    Ok(absolute.canonicalize()?)
 }
 
 fn build_run_request(directory: PathBuf, args: Vec<String>) -> Result<RunRequest, AppError> {
