@@ -82,6 +82,14 @@ pub async fn download_recursive(
             .and_then(|value| value.to_str().ok())
             .unwrap_or_default()
             .to_string();
+        let normalized_content_type = content_type.to_ascii_lowercase();
+        let is_html_content = normalized_content_type.contains("text/html");
+        let is_css_content = normalized_content_type.contains("text/css");
+        let is_root_resource = current_url == root_url;
+        if !is_root_resource && is_html_content {
+            continue;
+        }
+
         let bytes = response.bytes().await?;
         let destination = dest_dir.join(&relative_path);
         if let Some(parent) = destination.parent() {
@@ -89,12 +97,12 @@ pub async fn download_recursive(
         }
         fs::write(&destination, &bytes).await?;
 
-        if !content_type.contains("text/html") && !content_type.contains("text/css") {
+        if !is_html_content && !is_css_content {
             continue;
         }
 
         let text = String::from_utf8_lossy(&bytes);
-        if content_type.contains("text/html") {
+        if is_html_content {
             let document = Html::parse_document(&text);
             for element in document.select(&src_selector) {
                 for attribute in ["src", "href"] {
@@ -228,9 +236,11 @@ fn relative_path_from_url(url: &str) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{HashSet, VecDeque};
+
     use tempfile::tempdir;
 
-    use super::{download_recursive, inject_output_loader};
+    use super::{download_recursive, inject_output_loader, push_resource};
 
     #[test]
     fn injects_script_before_body_end() {
@@ -266,5 +276,28 @@ mod tests {
         let client = reqwest::Client::new();
         let result = download_recursive(&client, "://invalid", dir.path()).await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn queues_absolute_assets_and_relative_urls() {
+        let mut queue = VecDeque::new();
+        let visited = HashSet::new();
+
+        push_resource(
+            &mut queue,
+            &visited,
+            "https://example.com/visualizer/index.html",
+            "https://cdn.example.com/assets/foo.js",
+        );
+        push_resource(
+            &mut queue,
+            &visited,
+            "https://example.com/visualizer/index.html",
+            "./app.css",
+        );
+
+        assert_eq!(queue.len(), 2);
+        assert_eq!(queue[0].0, "https://cdn.example.com/assets/foo.js");
+        assert_eq!(queue[1].0, "https://example.com/visualizer/app.css");
     }
 }

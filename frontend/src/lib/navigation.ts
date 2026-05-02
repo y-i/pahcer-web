@@ -1,6 +1,7 @@
 export function buildTabHref(tabId: string, currentLocation: Pick<Location, 'search' | 'hash'>): string {
   const path = tabId === 'test-run' ? '/' : `/${tabId}`;
-  return `${path}${currentLocation.search}${currentLocation.hash}`;
+  const search = currentLocation.search;
+  return `${path}${search}${currentLocation.hash}`;
 }
 
 export function navigateToTab(tabId: string): void {

@@ -7,6 +7,7 @@ use tokio::fs;
 use tower::ServiceExt;
 
 use pahcer_web::server::{build_app, build_state};
+use pahcer_web::storage::Storage;
 
 #[tokio::test]
 async fn run_api_streams_and_materializes_result_as_symlink_by_default() {
@@ -401,5 +402,74 @@ fi
     let text = String::from_utf8(body.to_vec()).unwrap();
     assert!(text.contains("pahcer result json was not found after run"));
     assert!(text.contains("\"type\":\"exit\",\"code\":1"));
+    assert!(state.storage.read_history().await.unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn run_api_uses_request_directory_for_execution_and_result_storage() {
+    let dir = tempdir().unwrap();
+    let frontend = dir.path().join("dist");
+    let contest_dir = dir.path().join("contest");
+    fs::create_dir_all(&frontend).await.unwrap();
+    fs::create_dir_all(&contest_dir).await.unwrap();
+    fs::write(frontend.join("index.html"), "<html></html>")
+        .await
+        .unwrap();
+
+    let script_path = dir.path().join("fake-pahcer.sh");
+    fs::write(
+        &script_path,
+        r#"#!/usr/bin/env bash
+set -e
+cmd="$1"
+shift
+if [[ "$cmd" == "run" ]]; then
+  printf '%s' "$PWD" > request-dir.txt
+  mkdir -p pahcer/json
+  printf '{"start_time":"2026-03-28T12:00:00+09:00","case_count":1,"total_score":123,"total_score_log10":2.0,"total_relative_score":80,"max_execution_time":0.12,"comment":"memo","tag_name":"nightly","cases":[{"seed":0,"score":123,"execution_time":0.12,"error_message":""}]}' > "pahcer/json/result_20260328_120000.json"
+  echo '{"seed":0,"score":123,"execution_time":0.12}'
+fi
+"#,
+    )
+    .await
+    .unwrap();
+    stdfs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let state = build_state(dir.path().to_path_buf(), frontend, Some(script_path))
+        .await
+        .unwrap();
+    let app = build_app(state.clone());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/run")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "args": ["-c", "memo", "--tag", "nightly"],
+                        "directory": contest_dir,
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), 200);
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let text = String::from_utf8(body.to_vec()).unwrap();
+    assert!(text.contains("\"type\":\"exit\",\"code\":0"));
+
+    let recorded_dir = fs::read_to_string(contest_dir.join("request-dir.txt"))
+        .await
+        .unwrap();
+    assert_eq!(recorded_dir, contest_dir.to_string_lossy());
+
+    let contest_storage = Storage::new(contest_dir.clone()).unwrap();
+    let history = contest_storage.read_history().await.unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].avg_score, 123.0);
     assert!(state.storage.read_history().await.unwrap().is_empty());
 }

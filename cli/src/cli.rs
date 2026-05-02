@@ -6,14 +6,14 @@ use tokio::io::{self, AsyncWriteExt};
 
 use crate::{
     error::AppError,
-    models::StreamMessage,
+    models::{RunRequest, StreamMessage},
     server::{UiServerOptions, start_ui_server},
 };
 
 #[derive(Debug, Parser)]
 #[command(name = "pahcer-web", about = "Web UI for pahcer", version)]
 pub struct Cli {
-    #[arg(short = 'C', long, default_value = ".")]
+    #[arg(short = 'd', long = "dir", default_value = ".", global = true)]
     pub directory: PathBuf,
     #[command(subcommand)]
     pub command: Commands,
@@ -42,10 +42,12 @@ pub struct RunArgs {
 }
 
 pub async fn run_cli(cli: Cli) -> Result<ExitCode, AppError> {
-    match cli.command {
+    let Cli { directory, command } = cli;
+
+    match command {
         Commands::Ui(args) => {
             start_ui_server(UiServerOptions {
-                base_dir: cli.directory,
+                base_dir: directory,
                 port: args.port,
                 build_frontend: !args.no_build,
                 frontend_dir: None,
@@ -54,15 +56,37 @@ pub async fn run_cli(cli: Cli) -> Result<ExitCode, AppError> {
             .await?;
             Ok(ExitCode::SUCCESS)
         }
-        Commands::Run(args) => bridge_run_command(args.port, args.args).await,
+        Commands::Run(args) => bridge_run_command(directory, args.port, args.args).await,
     }
 }
 
-async fn bridge_run_command(port: u16, args: Vec<String>) -> Result<ExitCode, AppError> {
+fn resolve_directory_for_server(directory: PathBuf) -> Result<PathBuf, AppError> {
+    let absolute = if directory.is_absolute() {
+        directory
+    } else {
+        std::env::current_dir()?.join(directory)
+    };
+
+    Ok(absolute.canonicalize()?)
+}
+
+fn build_run_request(directory: PathBuf, args: Vec<String>) -> Result<RunRequest, AppError> {
+    Ok(RunRequest {
+        args,
+        directory: Some(resolve_directory_for_server(directory)?),
+    })
+}
+
+async fn bridge_run_command(
+    directory: PathBuf,
+    port: u16,
+    args: Vec<String>,
+) -> Result<ExitCode, AppError> {
+    let request = build_run_request(directory, args)?;
     let client = reqwest::Client::new();
     let response = client
         .post(format!("http://localhost:{port}/api/run"))
-        .json(&serde_json::json!({ "args": args }))
+        .json(&request)
         .send()
         .await
         .map_err(|error| {
@@ -114,6 +138,8 @@ async fn bridge_run_command(port: u16, args: Vec<String>) -> Result<ExitCode, Ap
 mod tests {
     use super::Cli;
     use clap::{CommandFactory, Parser};
+    use std::path::PathBuf;
+    use tempfile::tempdir;
 
     #[test]
     fn clap_definition_is_valid() {
@@ -130,5 +156,81 @@ mod tests {
             }
             _ => panic!("expected run command"),
         }
+    }
+
+    #[test]
+    fn directory_option_accepts_dir_flags() {
+        let long = Cli::try_parse_from(["pahcer-web", "--dir", "contest", "ui"]).unwrap();
+        assert_eq!(long.directory, PathBuf::from("contest"));
+
+        let short = Cli::try_parse_from(["pahcer-web", "-d", "contest", "ui"]).unwrap();
+        assert_eq!(short.directory, PathBuf::from("contest"));
+    }
+
+    #[test]
+    fn directory_option_is_accepted_after_ui_subcommand() {
+        let long = Cli::try_parse_from(["pahcer-web", "ui", "--dir", "contest"]).unwrap();
+        assert_eq!(long.directory, PathBuf::from("contest"));
+
+        let short = Cli::try_parse_from(["pahcer-web", "ui", "-d", "contest"]).unwrap();
+        assert_eq!(short.directory, PathBuf::from("contest"));
+    }
+
+    #[test]
+    fn directory_option_is_accepted_after_run_subcommand_without_entering_run_args() {
+        let long =
+            Cli::try_parse_from(["pahcer-web", "run", "--dir", "contest", "-c", "memo"])
+                .unwrap();
+        assert_eq!(long.directory, PathBuf::from("contest"));
+        match long.command {
+            super::Commands::Run(args) => {
+                assert_eq!(args.args, vec!["-c", "memo"]);
+            }
+            _ => panic!("expected run command"),
+        }
+
+        let short =
+            Cli::try_parse_from(["pahcer-web", "run", "-d", "contest", "-c", "memo"])
+                .unwrap();
+        assert_eq!(short.directory, PathBuf::from("contest"));
+        match short.command {
+            super::Commands::Run(args) => {
+                assert_eq!(args.args, vec!["-c", "memo"]);
+            }
+            _ => panic!("expected run command"),
+        }
+    }
+
+    #[test]
+    fn directory_option_after_delegated_run_args_is_left_in_run_args() {
+        let cli =
+            Cli::try_parse_from(["pahcer-web", "run", "-c", "memo", "-d", "contest"])
+                .unwrap();
+        assert_eq!(cli.directory, PathBuf::from("."));
+        match cli.command {
+            super::Commands::Run(args) => {
+                assert_eq!(args.args, vec!["-c", "memo", "-d", "contest"]);
+            }
+            _ => panic!("expected run command"),
+        }
+    }
+
+    #[test]
+    fn directory_option_defaults_to_current_directory() {
+        let cli = Cli::try_parse_from(["pahcer-web", "ui"]).unwrap();
+        assert_eq!(cli.directory, PathBuf::from("."));
+    }
+
+    #[test]
+    fn run_request_includes_resolved_directory() {
+        let temp = tempdir().unwrap();
+        let contest_dir = temp.path().join("contest");
+        std::fs::create_dir_all(&contest_dir).unwrap();
+
+        let request = super::build_run_request(PathBuf::from(&contest_dir), vec!["-c".into()])
+            .unwrap();
+
+        assert_eq!(request.args, vec!["-c"]);
+        assert_eq!(request.directory, Some(contest_dir));
     }
 }

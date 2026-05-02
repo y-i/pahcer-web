@@ -5,6 +5,7 @@
     type ConfigResponse,
     DEFAULT_TEST_RUN_OPTIONS,
     type GlobalConfig,
+    type HistoryScoreDisplayFormat,
     type LocalConfig,
     type VisualizerInitialScrollPosition,
   } from './api';
@@ -42,7 +43,8 @@
   });
 
   let localConfig = $state<LocalConfig>({
-    visualizerUrl: ''
+    visualizerUrl: '',
+    historyScoreDisplayFormat: 'plain',
   });
 
   let initialGlobalConfig = $state<GlobalConfig | null>(null);
@@ -58,6 +60,10 @@
   const visualizerInitialScrollOptions: Array<{ value: VisualizerInitialScrollPosition; label: string }> = [
     { value: 'top', label: '先頭から表示する' },
     { value: 'bottom', label: '末尾から表示する' },
+  ];
+  const historyScoreDisplayOptions: Array<{ value: HistoryScoreDisplayFormat; label: string }> = [
+    { value: 'plain', label: '通常表示' },
+    { value: 'scientific', label: '指数表示' },
   ];
 
   $effect(() => {
@@ -80,7 +86,11 @@
         testRunCompleted: initialConfig.global.notifications?.testRunCompleted ?? globalConfig.notifications!.testRunCompleted,
       },
     };
-    localConfig = { ...localConfig, ...initialConfig.local };
+    localConfig = {
+      ...localConfig,
+      ...initialConfig.local,
+      historyScoreDisplayFormat: initialConfig.local.historyScoreDisplayFormat ?? 'plain',
+    };
     syncSavedTestRunDefaults({
       shuffle: initialConfig.global.testRunOptions?.shuffle ?? DEFAULT_TEST_RUN_OPTIONS.shuffle,
       settingFile: initialConfig.global.testRunOptions?.settingFile ?? DEFAULT_TEST_RUN_OPTIONS.settingFile,
@@ -141,6 +151,8 @@
   async function saveLocal() {
     isSaving = true;
     try {
+      let downloadedVisualizer = false;
+
       if (localConfig.visualizerUrl) {
         const { exists } = await api.getVisualizerStatus();
         if (exists) {
@@ -152,6 +164,7 @@
         
         showMessage('Downloading visualizer and assets...');
         await api.downloadVisualizer(localConfig.visualizerUrl);
+        downloadedVisualizer = true;
       }
       
       await api.saveLocalConfig(localConfig);
@@ -162,7 +175,7 @@
         local: { ...localConfig },
       };
       onConfigChange(configSnapshot);
-      showMessage('Local config saved and visualizer downloaded!');
+      showMessage(downloadedVisualizer ? 'Local config saved and visualizer downloaded!' : 'Local config saved!');
     } catch (e) {
       console.error(e);
       showMessage(e instanceof Error ? e.message : 'Error occurred during save/download', true);
@@ -257,7 +270,7 @@
                     bind:value={globalConfig.visualizerInitialScrollPosition}
                     class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm transition-shadow"
                   >
-                    {#each visualizerInitialScrollOptions as option}
+                    {#each visualizerInitialScrollOptions as option (option.value)}
                       <option value={option.value}>{option.label}</option>
                     {/each}
                   </select>
@@ -416,6 +429,20 @@
                 class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm transition-shadow"
               />
               <p class="mt-2 text-xs text-gray-500">The URL of the visualizer for this specific project.</p>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1" for="history-score-display-format">History Score Display</label>
+              <select
+                id="history-score-display-format"
+                bind:value={localConfig.historyScoreDisplayFormat}
+                class="block w-full pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm rounded-md shadow-sm transition-shadow"
+              >
+                {#each historyScoreDisplayOptions as option (option.value)}
+                  <option value={option.value}>{option.label}</option>
+                {/each}
+              </select>
+              <p class="mt-2 text-xs text-gray-500">Controls how Avg Score and per-seed Score are displayed in the History tab for this project.</p>
             </div>
 
             <div>

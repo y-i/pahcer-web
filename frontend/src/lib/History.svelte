@@ -1,204 +1,312 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
-    import { api, type ConfigResponse, type GlobalConfig } from './api';
+    import { onMount } from 'svelte';
+    import { api, type ConfigResponse, type GlobalConfig, type LocalConfig } from './api';
+    import { navigateToTab } from './navigation';
 
     let { initialConfig }: { initialConfig: ConfigResponse } = $props();
 
-  let historyData = $state<any[]>([]);
-  let isLoading = $state(true);
-  let error = $state('');
-  let selectedRow = $state<any | null>(null);
-  let expandedRows = $state(new Set<string>());
-  let deletingIds = $state(new Set<string>());
+    let historyData = $state<any[]>([]);
+    let isLoading = $state(true);
+    let error = $state('');
+    let selectedRow = $state<any | null>(null);
+    let expandedRows = $state(new Set<string>());
+    let deletingIds = $state(new Set<string>());
 
-  let visualizerUrl = $state('/visualizer/index.html');
-  let config = $state<GlobalConfig>({
-    visualizerPosition: 'right',
+    let visualizerUrl = $state('/visualizer/index.html');
+    let config = $state<GlobalConfig>({
+        visualizerPosition: 'right',
         visualizerInitialScrollPosition: 'bottom',
-    visualizerUrl: '',
-    resultJsonMode: 'symlink',
-    defaultSeed: 0,
-    defaultScale: 1.0
-  });
+        visualizerUrl: '',
+        resultJsonMode: 'symlink',
+        defaultSeed: 0,
+        defaultScale: 1.0
+    });
+    let localConfig = $state<LocalConfig>({
+        visualizerUrl: ''
+    });
 
-  // Visualizer controls
-  let seed = $state(0);
-  let scalePercent = $state(100);
-  
-  // Derived iframeSrc
-  let iframeSrc = $derived.by(() => {
-    if (!selectedRow) return '';
-    const filename = String(seed).padStart(4, '0') + '.txt';
-    const outputUrl = encodeURIComponent(`/api/history/${selectedRow.id}/output/${filename}`);
+    let seed = $state(0);
+    let scalePercent = $state(100);
+    let urlSyncPhase = $state<'loading' | 'restoring' | 'ready'>('loading');
+    let visualizerStatus = $state<'idle' | 'checking' | 'ready' | 'missing'>('idle');
+    let visualizerStatusError = $state('');
+    let visualizerCheckToken = 0;
+
+    let iframeSrc = $derived.by(() => {
+        if (!selectedRow) return '';
+        const filename = String(seed).padStart(4, '0') + '.txt';
+        const outputUrl = encodeURIComponent(`/api/history/${selectedRow.id}/output/${filename}`);
         return `${visualizerUrl}?output_url=${outputUrl}&seed=${seed}&initial_scroll=${config.visualizerInitialScrollPosition}`;
-  });
+    });
 
-  let isUpdatingFromHistory = false;
+    onMount(() => {
+        window.addEventListener('popstate', restoreSelectionFromUrl);
 
-  onMount(() => {
-    window.addEventListener('popstate', handlePopState);
-    
-    (async () => {
-      try {
+        (async () => {
+            try {
                 const historyRes = await api.getHistory();
-        historyData = historyRes;
+                historyData = historyRes;
                 config = initialConfig.global;
+                localConfig = { ...localConfig, ...initialConfig.local };
+                resetVisualizerControls();
+                restoreSelectionFromUrl();
+            } catch (e) {
+                error = 'Failed to load data';
+                console.error(e);
+            } finally {
+                isLoading = false;
+            }
+        })();
 
+        return () => {
+            window.removeEventListener('popstate', restoreSelectionFromUrl);
+        };
+    });
+
+    function getDefaultScalePercent() {
+        return Math.round(config.defaultScale * 100);
+    }
+
+    function resetVisualizerControls() {
         seed = config.defaultSeed;
-        scalePercent = Math.round(config.defaultScale * 100);
-
-        // Initial sync from URL
-        handlePopState();
-      } catch (e) {
-        error = 'Failed to load data';
-        console.error(e);
-      } finally {
-        isLoading = false;
-      }
-    })();
-    
-    return () => {
-        window.removeEventListener('popstate', handlePopState);
-    };
-  });
-
-  function handlePopState() {
-      isUpdatingFromHistory = true;
-      const params = new URLSearchParams(window.location.search);
-      const id = params.get('id');
-      const oldId = selectedRow?.id;
-      
-      if (id) {
-          const row = historyData.find(r => r.id === id);
-          if (row) {
-              selectedRow = row;
-              const seedParam = params.get('seed');
-              if (seedParam) seed = Number(seedParam);
-              const scaleParam = params.get('scale');
-              if (scaleParam) scalePercent = Number(scaleParam);
-          } else {
-              // ID in URL but not in history (maybe deleted?)
-              selectedRow = null;
-          }
-      } else {
-          selectedRow = null;
-      }
-      
-      // Reset flag after a tick to ensure effects triggered by state changes don't overwrite URL immediately
-      setTimeout(() => {
-          isUpdatingFromHistory = false;
-      }, 0);
-  }
-
-  function selectRow(row: any) {
-    selectedRow = row;
-    // Reset to default values from config when opening a new result
-    seed = config.defaultSeed;
-    scalePercent = Math.round(config.defaultScale * 100);
-    // State change will trigger effect to update URL
-  }
-
-  function toggleDetails(row: any, event: Event) {
-    event.stopPropagation();
-    const newSet = new Set(expandedRows);
-    if (newSet.has(row.id)) {
-      newSet.delete(row.id);
-    } else {
-      newSet.add(row.id);
+        scalePercent = getDefaultScalePercent();
     }
-    expandedRows = newSet;
-  }
 
-  async function deleteRow(id: string, event: Event) {
-    event.stopPropagation();
-    if (!window.confirm('Are you sure you want to delete this execution result?')) return;
-    
-    deletingIds.add(id);
-    try {
-        await api.deleteHistory(id);
-        historyData = historyData.filter(r => r.id !== id);
-        if (selectedRow?.id === id) {
+    function parseNumericParam(value: string | null, fallback: number) {
+        if (value === null || value.trim() === '') {
+            return fallback;
+        }
+
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+    }
+
+    function markUrlSyncReady() {
+        setTimeout(() => {
+            urlSyncPhase = 'ready';
+        }, 0);
+    }
+
+    function restoreSelectionFromUrl() {
+        urlSyncPhase = 'restoring';
+
+        const params = new URLSearchParams(window.location.search);
+        const id = params.get('id');
+
+        if (!id) {
             selectedRow = null;
+            resetVisualizerControls();
+            markUrlSyncReady();
+            return;
         }
-    } catch (e) {
-        console.error('Failed to delete history:', e);
-        alert('Failed to delete history');
-    } finally {
-        deletingIds.delete(id);
+
+        const row = historyData.find((historyRow) => historyRow.id === id);
+        if (!row) {
+            selectedRow = null;
+            resetVisualizerControls();
+            markUrlSyncReady();
+            return;
+        }
+
+        selectedRow = row;
+        seed = parseNumericParam(params.get('seed'), config.defaultSeed);
+        scalePercent = parseNumericParam(params.get('scale'), getDefaultScalePercent());
+        markUrlSyncReady();
     }
-  }
 
-  // Sync URL when state changes
-  $effect(() => {
-    if (isUpdatingFromHistory) return;
+    function selectRow(row: any) {
+        if (selectedRow?.id === row.id) {
+            return;
+        }
 
-    const url = new URL(window.location.href);
-    const currentId = url.searchParams.get('id');
-    const currentSeed = url.searchParams.get('seed');
-    const currentScale = url.searchParams.get('scale');
+        selectedRow = row;
+        resetVisualizerControls();
+    }
 
-    // Deselected
-    if (!selectedRow) {
-        if (currentId) {
-            url.searchParams.delete('id');
-            url.searchParams.delete('seed');
-            url.searchParams.delete('scale');
+    function closeVisualizer() {
+        if (!selectedRow) {
+            return;
+        }
+
+        selectedRow = null;
+        resetVisualizerControls();
+    }
+
+    function goToProjectVisualizerSettings() {
+        navigateToTab('settings');
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                const input = document.getElementById('project-visualizer-url');
+                if (input instanceof HTMLInputElement) {
+                    input.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    input.focus();
+                }
+            });
+        });
+    }
+
+    function toggleDetails(row: any, event: Event) {
+        event.stopPropagation();
+        const newSet = new Set(expandedRows);
+        if (newSet.has(row.id)) {
+            newSet.delete(row.id);
+        } else {
+            newSet.add(row.id);
+        }
+        expandedRows = newSet;
+    }
+
+    function resolveDetailSeed(detail: any) {
+        const nextSeed = Number(detail.seed);
+        return Number.isFinite(nextSeed) ? nextSeed : config.defaultSeed;
+    }
+
+    function isActiveSeed(row: any, detail: any) {
+        return selectedRow?.id === row.id && seed === resolveDetailSeed(detail);
+    }
+
+    function openVisualizerForSeed(row: any, detail: any, event: Event) {
+        event.stopPropagation();
+
+        const resolvedSeed = resolveDetailSeed(detail);
+
+        if (selectedRow?.id !== row.id) {
+            selectedRow = row;
+            scalePercent = getDefaultScalePercent();
+        }
+
+        seed = resolvedSeed;
+    }
+
+    async function deleteRow(id: string, event: Event) {
+        event.stopPropagation();
+        if (!window.confirm('Are you sure you want to delete this execution result?')) return;
+
+        deletingIds.add(id);
+        try {
+            await api.deleteHistory(id);
+            historyData = historyData.filter(r => r.id !== id);
+            if (selectedRow?.id === id) {
+                selectedRow = null;
+            }
+        } catch (e) {
+            console.error('Failed to delete history:', e);
+            alert('Failed to delete history');
+        } finally {
+            deletingIds.delete(id);
+        }
+    }
+
+    $effect(() => {
+        if (urlSyncPhase !== 'ready') return;
+
+        const url = new URL(window.location.href);
+        const currentId = url.searchParams.get('id');
+        const currentSeed = url.searchParams.get('seed');
+        const currentScale = url.searchParams.get('scale');
+
+        if (!selectedRow) {
+            if (currentId || currentSeed || currentScale) {
+                url.searchParams.delete('id');
+                url.searchParams.delete('seed');
+                url.searchParams.delete('scale');
+                history.pushState(null, '', url.toString());
+            }
+            return;
+        }
+
+        const newId = selectedRow.id;
+        const newSeed = String(seed);
+        const newScale = String(scalePercent);
+
+        if (currentId !== newId) {
+            url.searchParams.set('id', newId);
+            url.searchParams.set('seed', newSeed);
+            url.searchParams.set('scale', newScale);
             history.pushState(null, '', url.toString());
+        } else if (currentSeed !== newSeed || currentScale !== newScale) {
+            url.searchParams.set('id', newId);
+            url.searchParams.set('seed', newSeed);
+            url.searchParams.set('scale', newScale);
+            history.replaceState(null, '', url.toString());
         }
-        return;
+    });
+
+    $effect(() => {
+        const selectedRowId = selectedRow?.id;
+
+        if (!selectedRowId) {
+            visualizerStatus = 'idle';
+            visualizerStatusError = '';
+            return;
+        }
+
+        const currentToken = ++visualizerCheckToken;
+        visualizerStatus = 'checking';
+        visualizerStatusError = '';
+
+        void (async () => {
+            try {
+                const { exists } = await api.getVisualizerStatus();
+                if (currentToken !== visualizerCheckToken) {
+                    return;
+                }
+                visualizerStatus = exists ? 'ready' : 'missing';
+            } catch (e) {
+                if (currentToken !== visualizerCheckToken) {
+                    return;
+                }
+                visualizerStatus = 'missing';
+                visualizerStatusError = e instanceof Error ? e.message : 'Failed to check visualizer status';
+            }
+        })();
+    });
+
+    function formatDate(iso: string) {
+        const d = new Date(iso);
+        const padjw = (n: number) => n.toString().padStart(2, '0');
+        return `${d.getFullYear()}/${padjw(d.getMonth() + 1)}/${padjw(d.getDate())} ${padjw(d.getHours())}:${padjw(d.getMinutes())}:${padjw(d.getSeconds())}`;
     }
 
-    // Selected
-    const newId = selectedRow.id;
-    const newSeed = String(seed);
-    const newScale = String(scalePercent);
-
-    if (currentId !== newId) {
-        // Row changed: Push
-        url.searchParams.set('id', newId);
-        url.searchParams.set('seed', newSeed);
-        url.searchParams.set('scale', newScale);
-        history.pushState(null, '', url.toString());
-    } else if (currentSeed !== newSeed || currentScale !== newScale) {
-        // Only params changed: Replace
-        url.searchParams.set('id', newId);
-        url.searchParams.set('seed', newSeed);
-        url.searchParams.set('scale', newScale);
-        history.replaceState(null, '', url.toString());
+    function usesScientificScoreDisplay() {
+        return localConfig.historyScoreDisplayFormat === 'scientific';
     }
-  });
 
-  function formatDate(iso: string) {
-      const d = new Date(iso);
-      const padjw = (n: number) => n.toString().padStart(2, '0');
-      return `${d.getFullYear()}/${padjw(d.getMonth() + 1)}/${padjw(d.getDate())} ${padjw(d.getHours())}:${padjw(d.getMinutes())}:${padjw(d.getSeconds())}`;
-  }
+    function formatHistoryScore(n: number) {
+        const rounded = Math.round(n);
+        if (usesScientificScoreDisplay()) {
+            if (rounded === 0) {
+                return '0';
+            }
+            return rounded.toExponential(2);
+        }
+        return rounded.toLocaleString();
+    }
 
-  function formatScore(n: number) {
-      return Math.round(n).toLocaleString();
-  }
+    function formatRelative(n: number) {
+        const s = n.toFixed(4);
+        const parts = s.split('.');
+        const intPart = parts[0].padStart(4, ' ');
+        return `${intPart}.${parts[1]}%`;
+    }
 
-  function formatRelative(n: number) {
-      const s = n.toFixed(4);
-      const parts = s.split('.');
-      // Integer part should be padded to 4 chars
-      const intPart = parts[0].padStart(4, ' ');
-      return `${intPart}.${parts[1]}%`;
-  }
+    function formatTime(n: number) {
+        return Math.round(n * 1000).toLocaleString();
+    }
 
-  function formatTime(n: number) {
-      return Math.round(n * 1000).toLocaleString();
-  }
+    function getACCount(row: any) {
+        if (row.ACcase !== undefined) {
+            return row.ACcase;
+        }
+        if (row.details && Array.isArray(row.details)) {
+            return row.details.filter((r: any) => (Number(r.score) || 0) > 0 && !r.error_message).length;
+        }
+        return 0;
+    }
 
-  function getACCount(row: any) {
-      if (row.ACcase !== undefined) {
-          return row.ACcase;
-      }
-      if (row.details && Array.isArray(row.details)) {
-          return row.details.filter((r: any) => (Number(r.score) || 0) > 0 && !r.error_message).length;
-      }
-      return 0;
-  }
+    function hasProjectVisualizerUrl() {
+        return (localConfig.visualizerUrl ?? '').trim().length > 0;
+    }
 </script>
 
 <div class="h-full flex flex-col bg-gray-50 overflow-hidden min-h-0">
@@ -244,7 +352,7 @@
                     </tr>
                 </thead>
                 <tbody class="bg-white divide-y divide-gray-200">
-                    {#each historyData as row}
+                    {#each historyData as row (row.id)}
                         <tr 
                             class="group hover:bg-indigo-50/50 cursor-pointer transition-colors duration-150 ease-in-out {selectedRow === row ? 'bg-indigo-50' : ''}"
                             onclick={() => selectRow(row)}
@@ -264,7 +372,7 @@
                             </td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono">{formatDate(row.datetime)}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right">{getACCount(row)}/{row.cases}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-mono font-medium text-right">{formatScore(row.avgScore)}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 font-mono font-medium text-right">{formatHistoryScore(row.avgScore)}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right">{row.avgLogScore.toFixed(3)}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right whitespace-pre">{row.avgRelativeScore !== undefined ? formatRelative(row.avgRelativeScore) : '-'}</td>
                             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-mono text-right">{Math.round(row.maxTime)}ms</td>
@@ -312,18 +420,26 @@
                                                             <th scope="col" class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Relative Score</th>
                                                             <th scope="col" class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider w-32">Time (ms)</th>
                                                             <th scope="col" class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Error</th>
-                                                            <th scope="col" class="px-4 py-2"></th>
                                                         </tr>
                                                     </thead>
                                                     <tbody class="divide-y divide-gray-200 bg-white">
-                                                        {#each row.details.slice().sort((a: any, b: any) => (Number(a.seed) || 0) - (Number(b.seed) || 0)) as detail}
+                                                        {#each row.details.slice().sort((a: any, b: any) => (Number(a.seed) || 0) - (Number(b.seed) || 0)) as detail (`${row.id}-${detail.seed}`)}
                                                             <tr class="hover:bg-gray-50">
-                                                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900 font-mono">{detail.seed}</td>
-                                                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900 font-mono font-medium text-right">{formatScore(Number(detail.score) || 0)}</td>
+                                                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900 font-mono">
+                                                                    <button
+                                                                        type="button"
+                                                                        onclick={(event) => openVisualizerForSeed(row, detail, event)}
+                                                                        class="inline-flex items-center rounded-md px-2 py-1 font-semibold underline decoration-indigo-300 underline-offset-2 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-1 hover:text-indigo-700 hover:decoration-indigo-500 {isActiveSeed(row, detail) ? 'bg-indigo-100 text-indigo-700 decoration-indigo-500' : 'text-indigo-600'}"
+                                                                        title="Open this seed in visualizer"
+                                                                        aria-label={`Open seed ${detail.seed} in visualizer`}
+                                                                    >
+                                                                        {detail.seed}
+                                                                    </button>
+                                                                </td>
+                                                                <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-900 font-mono font-medium text-right">{formatHistoryScore(Number(detail.score) || 0)}</td>
                                                                 <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 font-mono text-right whitespace-pre">{detail.relative_score !== undefined ? formatRelative(Number(detail.relative_score)) : '-'}</td>
                                                                 <td class="px-4 py-2 whitespace-nowrap text-sm text-gray-500 font-mono text-right">{detail.execution_time !== undefined ? formatTime(Number(detail.execution_time)) : (detail.time !== undefined ? formatTime(Number(detail.time)) : '-')}</td>
                                                                 <td class="px-4 py-2 text-sm text-red-600 font-mono">{detail.error_message || ''}</td>
-                                                                <td class="px-4 py-2"></td>
                                                             </tr>
                                                         {/each}
                                                     </tbody>
@@ -361,29 +477,41 @@
         {#if selectedRow}
             <div class="px-4 py-3 border-b border-gray-200 bg-white flex items-center space-x-6 shadow-sm z-10 min-w-0 flex-shrink-0">
                 <span class="text-xs font-bold text-gray-400 uppercase tracking-wider flex-shrink-0">Visualizer</span>
-                <div class="h-4 w-px bg-gray-300 flex-shrink-0"></div>
-                <div class="flex items-center space-x-3 min-w-0">
-                    <label class="text-sm font-medium text-gray-600 whitespace-nowrap" for="history-visualizer-seed">Seed</label>
-                    <input 
-                        id="history-visualizer-seed"
-                        type="number" 
-                        bind:value={seed} 
-                        class="w-20 px-2 py-1 bg-gray-50 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" 
-                    />
-                </div>
-                <div class="flex items-center space-x-3 min-w-0">
-                    <label class="text-sm font-medium text-gray-600 whitespace-nowrap" for="history-visualizer-scale">Scale (%)</label>
-                    <input 
-                        id="history-visualizer-scale"
-                        type="number" 
-                        step="5"
-                        bind:value={scalePercent} 
-                        class="w-16 px-2 py-1 bg-gray-50 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" 
-                    />
-                </div>
+                {#if visualizerStatus === 'ready'}
+                    <div class="h-4 w-px bg-gray-300 flex-shrink-0"></div>
+                    <div class="flex items-center space-x-3 min-w-0">
+                        <label class="text-sm font-medium text-gray-600 whitespace-nowrap" for="history-visualizer-seed">Seed</label>
+                        <input 
+                            id="history-visualizer-seed"
+                            type="number" 
+                            bind:value={seed} 
+                            class="w-20 px-2 py-1 bg-gray-50 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" 
+                        />
+                    </div>
+                    <div class="flex items-center space-x-3 min-w-0">
+                        <label class="text-sm font-medium text-gray-600 whitespace-nowrap" for="history-visualizer-scale">Scale (%)</label>
+                        <input 
+                            id="history-visualizer-scale"
+                            type="number" 
+                            step="5"
+                            bind:value={scalePercent} 
+                            class="w-16 px-2 py-1 bg-gray-50 border border-gray-300 rounded text-sm focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500" 
+                        />
+                    </div>
+                {:else if visualizerStatus === 'checking'}
+                    <div class="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700">
+                        <svg class="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span>ビジュアライザを確認中</span>
+                    </div>
+                {:else if visualizerStatus === 'missing'}
+                    <span class="inline-flex items-center rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-800">Project Settings の確認が必要です</span>
+                {/if}
                 <div class="flex-1"></div>
                 <button 
-                    onclick={() => selectedRow = null} 
+                    onclick={closeVisualizer} 
                     class="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors flex-shrink-0"
                     title="Close Visualizer"
                 >
@@ -391,12 +519,58 @@
                 </button>
             </div>
             <div class="flex-1 relative bg-gray-50 min-w-0 overflow-hidden">
-                <iframe 
-                    title="Visualizer"
-                    src={iframeSrc} 
-                    class="border-none"
-                    style="width: {10000 / scalePercent}%; height: {10000 / scalePercent}%; transform: scale({scalePercent / 100}); transform-origin: 0 0;"
-                ></iframe>
+                {#if visualizerStatus === 'ready'}
+                    <iframe 
+                        title="Visualizer"
+                        src={iframeSrc} 
+                        class="border-none"
+                        style="width: {10000 / scalePercent}%; height: {10000 / scalePercent}%; transform: scale({scalePercent / 100}); transform-origin: 0 0;"
+                    ></iframe>
+                {:else if visualizerStatus === 'checking'}
+                    <div class="flex h-full items-center justify-center">
+                        <div class="inline-flex items-center gap-3 rounded-2xl border border-gray-200 bg-white px-5 py-4 text-sm text-gray-600 shadow-sm">
+                            <svg class="h-5 w-5 animate-spin text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <span>ビジュアライザファイルの有無を確認しています...</span>
+                        </div>
+                    </div>
+                {:else}
+                    <div class="flex h-full items-center justify-center p-6">
+                        <div class="w-full max-w-lg rounded-3xl border border-amber-200 bg-white p-8 text-center shadow-lg shadow-amber-100/50">
+                            <div class="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+                                <svg class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                </svg>
+                            </div>
+                            {#if hasProjectVisualizerUrl()}
+                                <h3 class="text-lg font-bold text-gray-900">ビジュアライザファイルがまだ配置されていません</h3>
+                                <p class="mt-3 text-sm leading-6 text-gray-600">
+                                    Project Settings の Project Visualizer URL は設定済みですが、ローカルのビジュアライザファイルが見つかりません。
+                                    設定タブで URL を確認して Project Settings を保存し直すと、visualizer を再ダウンロードできます。
+                                </p>
+                            {:else}
+                                <h3 class="text-lg font-bold text-gray-900">Project Settings にビジュアライザ URL を設定してください</h3>
+                                <p class="mt-3 text-sm leading-6 text-gray-600">
+                                    評価履歴から visualizer を開くには、Project Settings の Project Visualizer URL を入力して保存し、
+                                    visualizer 本体をダウンロードする必要があります。
+                                </p>
+                            {/if}
+                            {#if visualizerStatusError}
+                                <p class="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-left text-xs text-amber-800">{visualizerStatusError}</p>
+                            {/if}
+                            <div class="mt-6 flex justify-center">
+                                <button
+                                    onclick={goToProjectVisualizerSettings}
+                                    class="inline-flex items-center rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700"
+                                >
+                                    設定へ移動
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                {/if}
             </div>
         {/if}
       </div>
