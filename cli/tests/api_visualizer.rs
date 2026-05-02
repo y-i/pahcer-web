@@ -51,6 +51,12 @@ async fn serve_visualizer_source(
             r#"<html><body><script src="/static/app.js"></script><a href="/child/page.js">child</a></body></html>"#,
         )
             .into_response(),
+        "index-case.html" => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            r#"<html><body><a href="/child/mixed-case.js">child</a></body></html>"#,
+        )
+            .into_response(),
         "static/app.js" => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, "application/javascript")],
@@ -63,10 +69,22 @@ async fn serve_visualizer_source(
             r#"<html><body><script src="/nested/app.js"></script></body></html>"#,
         )
             .into_response(),
+        "child/mixed-case.js" => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "Text/HTML; charset=utf-8")],
+            r#"<html><body><script src="/nested/mixed-case.js"></script></body></html>"#,
+        )
+            .into_response(),
         "nested/app.js" => (
             StatusCode::OK,
             [(header::CONTENT_TYPE, "application/javascript")],
             "console.log('nested');",
+        )
+            .into_response(),
+        "nested/mixed-case.js" => (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/javascript")],
+            "console.log('mixed-case');",
         )
             .into_response(),
         _ => StatusCode::NOT_FOUND.into_response(),
@@ -133,4 +151,59 @@ async fn download_visualizer_keeps_root_html_and_skips_recursive_html() {
     assert!(requests.iter().any(|path| path == "/static/app.js"));
     assert!(requests.iter().any(|path| path == "/child/page.js"));
     assert!(!requests.iter().any(|path| path == "/nested/app.js"));
+}
+
+#[tokio::test]
+async fn download_visualizer_skips_recursive_html_with_mixed_case_content_type() {
+    let dir = tempdir().unwrap();
+    let frontend = dir.path().join("dist");
+    fs::create_dir_all(&frontend).await.unwrap();
+    fs::write(frontend.join("index.html"), "<html></html>")
+        .await
+        .unwrap();
+    let (source_url, requests, source_handle) = spawn_visualizer_source().await;
+
+    let state = build_state(
+        dir.path().to_path_buf(),
+        frontend,
+        Some(dir.path().join("fake-pahcer")),
+    )
+    .await
+    .unwrap();
+
+    let app = build_app(state.clone());
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/visualizer/download")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "url": format!("{source_url}/index-case.html")
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    source_handle.abort();
+
+    let visualizer_dir = state.storage.visualizer_dir();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        fs::read_to_string(state.storage.visualizer_path())
+            .await
+            .unwrap(),
+        r#"<html><body><a href="/child/mixed-case.js">child</a></body></html>"#
+    );
+    assert!(!visualizer_dir.join("child/mixed-case.js").exists());
+    assert!(!visualizer_dir.join("nested/mixed-case.js").exists());
+
+    let requests = requests.lock().unwrap().clone();
+    assert!(requests.iter().any(|path| path == "/index-case.html"));
+    assert!(requests.iter().any(|path| path == "/child/mixed-case.js"));
+    assert!(!requests.iter().any(|path| path == "/nested/mixed-case.js"));
 }
