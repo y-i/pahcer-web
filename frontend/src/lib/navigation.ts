@@ -1,6 +1,6 @@
 export function buildTabHref(tabId: string, currentLocation: Pick<Location, 'search' | 'hash'>): string {
   const path = tabId === 'test-run' ? '/' : `/${tabId}`;
-  const search = tabId === 'history' ? currentLocation.search : '';
+  const search = currentLocation.search;
   return `${path}${search}${currentLocation.hash}`;
 }
 
