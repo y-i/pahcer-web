@@ -15,14 +15,6 @@ pub async fn download_recursive(
     url: &str,
     dest_dir: &Path,
 ) -> Result<(), AppError> {
-    if let Ok(root_url) = Url::parse(url)
-        && is_excluded_atcoder_page(&root_url)
-    {
-        return Err(AppError::BadRequest(format!(
-            "Refusing to download visualizer page from {url}"
-        )));
-    }
-
     let root_url = url.to_string();
     let mut visited = HashSet::new();
     let mut queue = VecDeque::from([(root_url.clone(), PathBuf::from("index.html"))]);
@@ -90,6 +82,11 @@ pub async fn download_recursive(
             .and_then(|value| value.to_str().ok())
             .unwrap_or_default()
             .to_string();
+        let is_root_resource = current_url == root_url;
+        if !is_root_resource && content_type.contains("text/html") {
+            continue;
+        }
+
         let bytes = response.bytes().await?;
         let destination = dest_dir.join(&relative_path);
         if let Some(parent) = destination.parent() {
@@ -204,8 +201,6 @@ fn push_resource(
         || raw_path.starts_with("data:")
     {
         if (raw_path.starts_with("http://") || raw_path.starts_with("https://"))
-            && let Ok(url) = Url::parse(raw_path)
-            && !is_excluded_atcoder_page(&url)
             && let Some(relative_path) = relative_path_from_url(raw_path)
             && !visited.contains(raw_path)
         {
@@ -217,9 +212,6 @@ fn push_resource(
     let Ok(url) = Url::parse(current_url).and_then(|base| base.join(raw_path)) else {
         return;
     };
-    if is_excluded_atcoder_page(&url) {
-        return;
-    }
     let resolved = url.to_string();
     if visited.contains(&resolved) {
         return;
@@ -239,20 +231,13 @@ fn relative_path_from_url(url: &str) -> Option<PathBuf> {
     }
 }
 
-fn is_excluded_atcoder_page(url: &Url) -> bool {
-    url.scheme() == "https" && url.host_str() == Some("atcoder.jp")
-}
-
 #[cfg(test)]
 mod tests {
     use std::collections::{HashSet, VecDeque};
 
     use tempfile::tempdir;
-    use url::Url;
 
-    use super::{
-        download_recursive, inject_output_loader, is_excluded_atcoder_page, push_resource,
-    };
+    use super::{download_recursive, inject_output_loader, push_resource};
 
     #[test]
     fn injects_script_before_body_end() {
@@ -291,20 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn excludes_only_atcoder_root_pages() {
-        assert!(is_excluded_atcoder_page(
-            &Url::parse("https://atcoder.jp/contests/abc/tasks/abc_a").unwrap()
-        ));
-        assert!(!is_excluded_atcoder_page(
-            &Url::parse("https://img.atcoder.jp/abc/foo.js").unwrap()
-        ));
-        assert!(!is_excluded_atcoder_page(
-            &Url::parse("http://atcoder.jp/contests/abc/tasks/abc_a").unwrap()
-        ));
-    }
-
-    #[test]
-    fn skips_excluded_absolute_atcoder_pages() {
+    fn queues_absolute_assets_and_relative_urls() {
         let mut queue = VecDeque::new();
         let visited = HashSet::new();
 
@@ -312,22 +284,7 @@ mod tests {
             &mut queue,
             &visited,
             "https://example.com/visualizer/index.html",
-            "https://atcoder.jp/contests/abc/tasks/abc_a",
-        );
-
-        assert!(queue.is_empty());
-    }
-
-    #[test]
-    fn keeps_non_excluded_assets_and_relative_urls() {
-        let mut queue = VecDeque::new();
-        let visited = HashSet::new();
-
-        push_resource(
-            &mut queue,
-            &visited,
-            "https://example.com/visualizer/index.html",
-            "https://img.atcoder.jp/abc/foo.js",
+            "https://cdn.example.com/assets/foo.js",
         );
         push_resource(
             &mut queue,
@@ -337,23 +294,7 @@ mod tests {
         );
 
         assert_eq!(queue.len(), 2);
-        assert_eq!(queue[0].0, "https://img.atcoder.jp/abc/foo.js");
+        assert_eq!(queue[0].0, "https://cdn.example.com/assets/foo.js");
         assert_eq!(queue[1].0, "https://example.com/visualizer/app.css");
-    }
-
-    #[tokio::test]
-    async fn returns_error_for_excluded_root_visualizer_url() {
-        let dir = tempdir().unwrap();
-        let client = reqwest::Client::new();
-        let error = download_recursive(
-            &client,
-            "https://atcoder.jp/contests/abc/tasks/abc_a",
-            dir.path(),
-        )
-        .await
-        .unwrap_err();
-
-        assert!(matches!(error, crate::error::AppError::BadRequest(_)));
-        assert!(error.to_string().contains("atcoder.jp"));
     }
 }
