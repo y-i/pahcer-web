@@ -27,7 +27,9 @@ async fn history_reads_materialized_result_and_delete_keeps_pahcer_json() {
 
     let result_dir = state.storage.result_dir("123");
     fs::create_dir_all(result_dir.join("output")).await.unwrap();
-    fs::create_dir_all(state.storage.pahcer_json_dir()).await.unwrap();
+    fs::create_dir_all(state.storage.pahcer_json_dir())
+        .await
+        .unwrap();
     fs::write(
         state.storage.additional_path("123"),
         serde_json::json!({
@@ -43,7 +45,9 @@ async fn history_reads_materialized_result_and_delete_keeps_pahcer_json() {
     .await
     .unwrap();
     fs::write(
-        state.storage.pahcer_result_path("result_20260314_151401.json"),
+        state
+            .storage
+            .pahcer_result_path("result_20260314_151401.json"),
         serde_json::json!({
             "start_time":"2026-03-14T15:14:01+09:00",
             "case_count":2,
@@ -64,7 +68,11 @@ async fn history_reads_materialized_result_and_delete_keeps_pahcer_json() {
     .unwrap();
     state
         .storage
-        .materialize_result_json("123", "result_20260314_151401.json", ResultJsonMode::Symlink)
+        .materialize_result_json(
+            "123",
+            "result_20260314_151401.json",
+            ResultJsonMode::Symlink,
+        )
         .await
         .unwrap();
 
@@ -99,11 +107,19 @@ async fn history_reads_materialized_result_and_delete_keeps_pahcer_json() {
         .unwrap();
     assert_eq!(response.status(), 200);
     assert!(!state.storage.result_dir("123").exists());
-    assert!(state
-        .storage
-        .pahcer_result_path("result_20260314_151401.json")
-        .exists());
-    assert!(stdfs::metadata(state.storage.pahcer_result_path("result_20260314_151401.json"))
+    assert!(
+        state
+            .storage
+            .pahcer_result_path("result_20260314_151401.json")
+            .exists()
+    );
+    assert!(
+        stdfs::metadata(
+            state
+                .storage
+                .pahcer_result_path("result_20260314_151401.json")
+        )
         .unwrap()
-        .is_file());
+        .is_file()
+    );
 }

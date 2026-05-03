@@ -247,9 +247,7 @@ mod tests {
         let html = "<html><body><textarea></textarea></body></html>";
         let injected = inject_output_loader(html);
         let update_output_index = injected.find("window.updateOutput();").unwrap();
-        let apply_scroll_index = injected
-            .find("applyInitialScroll();")
-            .unwrap();
+        let apply_scroll_index = injected.find("applyInitialScroll();").unwrap();
 
         assert!(injected.contains("output_url"));
         assert!(injected.contains("initial_scroll"));

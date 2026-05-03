@@ -241,9 +241,7 @@ pub fn is_ac(value: &Value) -> bool {
 }
 
 pub fn parse_result_file_datetime(file_name: &str) -> Option<NaiveDateTime> {
-    let timestamp = file_name
-        .strip_prefix("result_")?
-        .strip_suffix(".json")?;
+    let timestamp = file_name.strip_prefix("result_")?.strip_suffix(".json")?;
     NaiveDateTime::parse_from_str(timestamp, "%Y%m%d_%H%M%S").ok()
 }
 
@@ -320,6 +318,9 @@ mod tests {
     #[test]
     fn result_file_datetime_is_parsed_from_filename() {
         let parsed = parse_result_file_datetime("result_20260314_151401.json").unwrap();
-        assert_eq!(parsed.format("%Y-%m-%dT%H:%M:%S").to_string(), "2026-03-14T15:14:01");
+        assert_eq!(
+            parsed.format("%Y-%m-%dT%H:%M:%S").to_string(),
+            "2026-03-14T15:14:01"
+        );
     }
 }

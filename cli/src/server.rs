@@ -187,9 +187,7 @@ async fn run_init(
 ) -> Result<Json<ConfigResponse>, AppError> {
     let problem = request.problem.trim();
     if problem.is_empty() {
-        return Err(AppError::BadRequest(
-            "Problem name is required".to_string(),
-        ));
+        return Err(AppError::BadRequest("Problem name is required".to_string()));
     }
 
     let _init_guard = state.init_lock.lock().await;
@@ -281,9 +279,7 @@ async fn load_config_response(state: &AppState) -> Result<ConfigResponse, AppErr
             ProblemConfigState::Initialized { problem_name } => {
                 (InitializationState::Initialized, None, Some(problem_name))
             }
-            ProblemConfigState::Uninitialized => {
-                (InitializationState::Uninitialized, None, None)
-            }
+            ProblemConfigState::Uninitialized => (InitializationState::Uninitialized, None, None),
             ProblemConfigState::Invalid { message } => {
                 (InitializationState::Invalid, Some(message), None)
             }
@@ -390,15 +386,14 @@ async fn list_pahcer(
 
 fn validate_run_id(run_id: &str) -> Result<&str, AppError> {
     if !run_id.is_empty()
-        && run_id.bytes().all(|byte| {
-            matches!(byte, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'-' | b'_')
-        })
+        && run_id
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b'-' | b'_'))
     {
         Ok(run_id)
     } else {
         Err(AppError::BadRequest(
-            "runId must contain only ASCII letters, digits, hyphens, or underscores"
-                .to_string(),
+            "runId must contain only ASCII letters, digits, hyphens, or underscores".to_string(),
         ))
     }
 }
@@ -424,9 +419,7 @@ async fn run_pahcer(
     let run_storage = Storage::new(run_base_dir.clone())?;
 
     if run_storage.run_id_exists(&run_id).await? {
-        return Err(AppError::Conflict(format!(
-            "Run {run_id} already exists"
-        )));
+        return Err(AppError::Conflict(format!("Run {run_id} already exists")));
     }
 
     let mut args = request.args;
@@ -468,7 +461,13 @@ async fn run_pahcer(
     };
 
     tokio::spawn(async move {
-        let outcome = run_pahcer_task(state_clone.clone(), request, cancel_receiver, sender.clone()).await;
+        let outcome = run_pahcer_task(
+            state_clone.clone(),
+            request,
+            cancel_receiver,
+            sender.clone(),
+        )
+        .await;
         if let Err(error) = outcome {
             let message = StreamMessage::Stderr {
                 data: format!("{error}\n"),
@@ -908,7 +907,11 @@ fn default_frontend_dir() -> PathBuf {
         .join("frontend")
 }
 
-async fn copy_output_files(base_dir: &Path, storage: &Storage, run_id: &str) -> Result<(), AppError> {
+async fn copy_output_files(
+    base_dir: &Path,
+    storage: &Storage,
+    run_id: &str,
+) -> Result<(), AppError> {
     let tools_out_dir = base_dir.join("tools").join("out");
     let mut entries = match fs::read_dir(&tools_out_dir).await {
         Ok(entries) => entries,
@@ -984,13 +987,13 @@ fn serialize_stream_message(message: &StreamMessage) -> Bytes {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
     use std::{
         collections::BTreeMap,
         ffi::OsString,
         os::unix::process::ExitStatusExt,
         sync::{Arc, OnceLock},
     };
-    use std::time::Duration;
 
     use axum::{body::Body, http::Request};
     use http_body_util::BodyExt;

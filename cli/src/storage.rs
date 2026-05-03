@@ -1,6 +1,6 @@
 use std::{
-    collections::hash_map::DefaultHasher,
     collections::HashMap,
+    collections::hash_map::DefaultHasher,
     env,
     hash::{Hash, Hasher},
     io,
@@ -191,7 +191,8 @@ impl Storage {
         timestamp: &str,
         additional: &AdditionalResultMetadata,
     ) -> Result<(), AppError> {
-        self.write_json(&self.additional_path(timestamp), additional).await
+        self.write_json(&self.additional_path(timestamp), additional)
+            .await
     }
 
     pub async fn materialize_result_json(
@@ -224,7 +225,9 @@ impl Storage {
         Ok(())
     }
 
-    pub async fn list_pahcer_result_files(&self) -> Result<HashMap<String, PahcerResultFileState>, AppError> {
+    pub async fn list_pahcer_result_files(
+        &self,
+    ) -> Result<HashMap<String, PahcerResultFileState>, AppError> {
         let mut entries = match fs::read_dir(self.pahcer_json_dir()).await {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -244,7 +247,10 @@ impl Storage {
             if file_name.starts_with("result_") && file_name.ends_with(".json") {
                 let metadata = entry.metadata().await?;
                 let content = fs::read(entry.path()).await?;
-                files.insert(file_name, PahcerResultFileState::from_content(&metadata, &content));
+                files.insert(
+                    file_name,
+                    PahcerResultFileState::from_content(&metadata, &content),
+                );
             }
         }
 
@@ -255,7 +261,10 @@ impl Storage {
         &self,
         file_name: &str,
     ) -> Result<Option<PahcerResultFile>, AppError> {
-        match self.read_result_file(self.pahcer_result_path(file_name)).await? {
+        match self
+            .read_result_file(self.pahcer_result_path(file_name))
+            .await?
+        {
             Some(result) => Ok(Some(result)),
             None => Ok(None),
         }
@@ -323,8 +332,16 @@ impl Storage {
         Ok(candidates
             .into_iter()
             .min_by(|left, right| {
-                let left_delta = left.2.signed_duration_since(run_started_at).num_milliseconds().abs();
-                let right_delta = right.2.signed_duration_since(run_started_at).num_milliseconds().abs();
+                let left_delta = left
+                    .2
+                    .signed_duration_since(run_started_at)
+                    .num_milliseconds()
+                    .abs();
+                let right_delta = right
+                    .2
+                    .signed_duration_since(run_started_at)
+                    .num_milliseconds()
+                    .abs();
                 left_delta
                     .cmp(&right_delta)
                     .then_with(|| right.2.cmp(&left.2))
@@ -379,7 +396,10 @@ impl Storage {
         Ok(())
     }
 
-    async fn read_history_entry(&self, result_dir: &Path) -> Result<Option<StoredResult>, AppError> {
+    async fn read_history_entry(
+        &self,
+        result_dir: &Path,
+    ) -> Result<Option<StoredResult>, AppError> {
         let additional_path = result_dir.join("additional.json");
         let additional = match fs::read_to_string(&additional_path).await {
             Ok(content) => match serde_json::from_str::<AdditionalResultMetadata>(&content) {
@@ -398,7 +418,9 @@ impl Storage {
             return Ok(None);
         };
 
-        Ok(Some(normalize_history_result(timestamp, additional, result)?))
+        Ok(Some(normalize_history_result(
+            timestamp, additional, result,
+        )?))
     }
 }
 
@@ -431,7 +453,10 @@ fn normalize_history_result(
         } else {
             additional.id
         },
-        datetime: normalize_datetime_source(&pahcer_result.start_time, &additional.result_file_name),
+        datetime: normalize_datetime_source(
+            &pahcer_result.start_time,
+            &additional.result_file_name,
+        ),
         args: additional.args,
         comment: pahcer_result.comment,
         tag: pahcer_result.tag_name.unwrap_or_default(),
@@ -572,12 +597,7 @@ mod tests {
         let storage = Storage::new(dir.path()).unwrap();
 
         fs::create_dir_all(storage.result_dir("321")).await.unwrap();
-        fs::write(
-            storage.result_path("321"),
-            "{}",
-        )
-        .await
-        .unwrap();
+        fs::write(storage.result_path("321"), "{}").await.unwrap();
 
         let history = storage.read_history().await.unwrap();
         assert!(history.is_empty());
@@ -630,12 +650,9 @@ mod tests {
             )
             .await
             .unwrap();
-        fs::write(
-            storage.result_path("556"),
-            "{broken json",
-        )
-        .await
-        .unwrap();
+        fs::write(storage.result_path("556"), "{broken json")
+            .await
+            .unwrap();
 
         let history = storage.read_history().await.unwrap();
         assert!(history.is_empty());
@@ -701,7 +718,11 @@ mod tests {
         .unwrap();
 
         storage
-            .materialize_result_json("123", "result_20260314_151401.json", ResultJsonMode::Symlink)
+            .materialize_result_json(
+                "123",
+                "result_20260314_151401.json",
+                ResultJsonMode::Symlink,
+            )
             .await
             .unwrap();
 

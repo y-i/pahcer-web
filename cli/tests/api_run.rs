@@ -143,7 +143,8 @@ fi
     assert_eq!(output, "out0");
 
     let additional_path = state.storage.additional_path(&result.id);
-    let additional: serde_json::Value = serde_json::from_str(&fs::read_to_string(&additional_path).await.unwrap()).unwrap();
+    let additional: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&additional_path).await.unwrap()).unwrap();
     let result_file_name = additional["resultFileName"].as_str().unwrap();
     fs::write(
         state.storage.pahcer_result_path(result_file_name),
@@ -175,7 +176,9 @@ async fn run_api_detects_overwritten_same_name_result_file() {
     fs::write(frontend.join("index.html"), "<html></html>")
         .await
         .unwrap();
-    fs::create_dir_all(dir.path().join("pahcer/json")).await.unwrap();
+    fs::create_dir_all(dir.path().join("pahcer/json"))
+        .await
+        .unwrap();
     fs::write(
         dir.path().join("pahcer/json/result_20260314_151401.json"),
         serde_json::json!({
@@ -296,7 +299,12 @@ fi
     let jobs = state.storage.get_jobs().await.unwrap();
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].status, pahcer_web::models::JobStatus::Failed);
-    assert!(!jobs[0].result.as_ref().unwrap()["error"].as_str().unwrap().is_empty());
+    assert!(
+        !jobs[0].result.as_ref().unwrap()["error"]
+            .as_str()
+            .unwrap()
+            .is_empty()
+    );
     assert!(state.storage.read_history().await.unwrap().is_empty());
 }
 
@@ -374,11 +382,9 @@ fi
     .unwrap();
     let result_file_name = additional["resultFileName"].as_str().unwrap();
     let result_body = fs::read_to_string(&result_path).await.unwrap();
-    let source_body = fs::read_to_string(
-        state.storage.pahcer_result_path(result_file_name),
-    )
-    .await
-    .unwrap();
+    let source_body = fs::read_to_string(state.storage.pahcer_result_path(result_file_name))
+        .await
+        .unwrap();
     assert_eq!(result_body, source_body);
     assert!(result_body.contains("\"comment\":\"memo\""));
 }
@@ -392,7 +398,9 @@ async fn run_api_fails_when_no_new_result_json_is_created() {
     fs::write(frontend.join("index.html"), "<html></html>")
         .await
         .unwrap();
-    fs::create_dir_all(dir.path().join("pahcer/json")).await.unwrap();
+    fs::create_dir_all(dir.path().join("pahcer/json"))
+        .await
+        .unwrap();
     fs::write(
         dir.path().join("pahcer/json/result_20260320_120000.json"),
         serde_json::json!({
@@ -794,8 +802,18 @@ fi
     assert_eq!(jobs[0].status, pahcer_web::models::JobStatus::Canceled);
     let job_result = jobs[0].result.as_ref().unwrap();
     assert_eq!(job_result["terminationReason"], "canceled");
-    assert!(job_result["logs"].as_str().unwrap().contains("before cancel stdout"));
-    assert!(job_result["logs"].as_str().unwrap().contains("before cancel stderr"));
+    assert!(
+        job_result["logs"]
+            .as_str()
+            .unwrap()
+            .contains("before cancel stdout")
+    );
+    assert!(
+        job_result["logs"]
+            .as_str()
+            .unwrap()
+            .contains("before cancel stderr")
+    );
 
     assert!(!state.storage.result_dir(run_id).exists());
     assert!(state.storage.read_history().await.unwrap().is_empty());

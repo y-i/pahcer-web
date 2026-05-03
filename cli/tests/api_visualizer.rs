@@ -1,12 +1,15 @@
-use std::{net::Ipv4Addr, sync::{Arc, Mutex}};
+use std::{
+    net::Ipv4Addr,
+    sync::{Arc, Mutex},
+};
 
 use axum::{
+    Router,
     body::Body,
     extract::{Path as AxumPath, State},
     http::{Request, StatusCode, header},
     response::IntoResponse,
     routing::get,
-    Router,
 };
 use tempfile::tempdir;
 use tokio::{fs, net::TcpListener, task::JoinHandle};

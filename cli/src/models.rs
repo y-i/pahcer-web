@@ -214,8 +214,12 @@ pub enum RunTerminationReason {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum StreamMessage {
-    Stdout { data: String },
-    Stderr { data: String },
+    Stdout {
+        data: String,
+    },
+    Stderr {
+        data: String,
+    },
     Exit {
         code: i32,
         #[serde(rename = "runId", alias = "run_id")]
