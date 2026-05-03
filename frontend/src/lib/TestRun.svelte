@@ -2,6 +2,7 @@
   import { onMount, tick } from 'svelte';
   import type { ConfigResponse } from './api';
   import {
+    cancelTestRun,
     clearRunLogs,
     hydrateTestRunState,
     refreshNotificationPermission,
@@ -81,39 +82,32 @@
 
             </button>
 
-            <button
-
-              onclick={startTestRun}
-
-              disabled={$testRunState.isRunning}
-
-                class="px-6 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all transform active:scale-95"
-
-            >
-
-              {#if $testRunState.isRunning}
-
-                    <span class="flex items-center">
-
-                        <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-
-                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-
-                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-
-                        </svg>
-
-                        Running...
-
-                    </span>
-
+            {#if $testRunState.isRunning}
+              <button
+                onclick={cancelTestRun}
+                disabled={$testRunState.status === 'canceling'}
+                class="px-6 py-2 text-sm font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-amber-500 transition-all transform active:scale-95"
+              >
+                {#if $testRunState.status === 'canceling'}
+                  <span class="flex items-center">
+                    <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Canceling...
+                  </span>
                 {:else}
-
-                    Run Test
-
+                  Cancel Run
                 {/if}
-
-            </button>
+              </button>
+            {:else}
+              <button
+                onclick={startTestRun}
+                class="px-6 py-2 text-sm font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all transform active:scale-95"
+              >
+                Run Test
+              </button>
+            {/if}
 
         </div>
 
@@ -249,7 +243,7 @@
 
               {#if $testRunState.isRunning}
                 <div class="col-span-2 text-xs text-amber-600">
-                Notification setting is locked for the active run and will apply as {$testRunState.notifications.currentEnabled ? 'enabled' : 'disabled'} until completion.
+                Notification setting is locked while the current run is {$testRunState.status === 'canceling' ? 'canceling' : 'running'} and will apply as {$testRunState.notifications.currentEnabled ? 'enabled' : 'disabled'} until completion.
                 </div>
               {/if}
 
@@ -258,7 +252,13 @@
         <div class="lg:col-span-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3 space-y-1">
           <div class="flex items-center justify-between gap-4 text-xs font-semibold uppercase tracking-[0.2em] text-gray-400">
             <span>Current command</span>
-            {#if $testRunState.lastExitCode !== null}
+            {#if $testRunState.status === 'running'}
+              <span class="text-green-600">Running</span>
+            {:else if $testRunState.status === 'canceling'}
+              <span class="text-amber-600">Canceling</span>
+            {:else if $testRunState.status === 'canceled'}
+              <span class="text-amber-600">Canceled</span>
+            {:else if $testRunState.lastExitCode !== null}
               <span class={$testRunState.lastExitCode === 0 ? 'text-green-600' : 'text-red-500'}>
                 Exit code {$testRunState.lastExitCode}
               </span>
@@ -291,7 +291,7 @@
 
       </div>
 
-      {#if $testRunState.isRunning}
+      {#if $testRunState.status === 'running'}
 
         <div class="flex items-center space-x-2 px-2 py-1 bg-green-900/20 rounded border border-green-900/30">
 
@@ -304,6 +304,32 @@
             </span>
 
             <span class="text-xs font-bold text-green-400 uppercase tracking-tight">Active</span>
+
+        </div>
+
+      {:else if $testRunState.status === 'canceling'}
+
+        <div class="flex items-center space-x-2 px-2 py-1 bg-amber-900/20 rounded border border-amber-900/30">
+
+            <span class="relative flex h-2 w-2">
+
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+
+              <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+
+            </span>
+
+            <span class="text-xs font-bold text-amber-400 uppercase tracking-tight">Canceling</span>
+
+        </div>
+
+      {:else if $testRunState.status === 'canceled'}
+
+        <div class="flex items-center space-x-2 px-2 py-1 bg-amber-900/20 rounded border border-amber-900/30">
+
+            <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+
+            <span class="text-xs font-bold text-amber-400 uppercase tracking-tight">Canceled</span>
 
         </div>
 
@@ -320,7 +346,7 @@
 
     >
 
-      {#each $testRunState.logs as log}
+      {#each $testRunState.logs as log, index (`${index}:${log.type}:${log.text}`)}
 
         <div class="leading-relaxed break-words {log.type === 'stderr' ? 'text-red-400' : log.type === 'info' ? 'text-indigo-400 font-bold' : 'text-gray-300'}">
 

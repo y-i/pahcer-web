@@ -22,10 +22,12 @@ export interface RunLogEntry {
   text: string;
 }
 
+export type RunTerminationReason = 'completed' | 'failed' | 'canceled';
+
 export type RunStreamEvent =
   | { type: 'stdout'; data: string }
   | { type: 'stderr'; data: string }
-  | { type: 'exit'; code: number };
+  | { type: 'exit'; code: number; runId: string; reason: RunTerminationReason };
 
 export const DEFAULT_TEST_RUN_OPTIONS: TestRunOptions = {
   shuffle: false,
@@ -83,7 +85,12 @@ export interface JobMetadata {
   datetime: string;
   command: string;
   args: string[];
-  status: 'running' | 'success' | 'failed';
+  status: 'running' | 'success' | 'failed' | 'canceled';
+}
+
+export interface RunRequestPayload {
+  runId: string;
+  args: string[];
 }
 
 export async function readApiError(response: Response, fallbackMessage: string): Promise<Error> {
@@ -181,11 +188,11 @@ export const api = {
     await assertOk(res, 'Failed to delete history');
   },
 
-  async runPahcer(args: string[], onData: (data: RunStreamEvent) => void): Promise<void> {
+  async runPahcer(request: RunRequestPayload, onData: (data: RunStreamEvent) => void): Promise<void> {
     const res = await fetch('/api/run', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ args }),
+      body: JSON.stringify(request),
     });
 
     await assertOk(res, 'Failed to start pahcer run');
@@ -215,5 +222,13 @@ export const api = {
         }
       }
     }
+  },
+
+  async cancelRun(runId: string): Promise<void> {
+    const res = await fetch(`/api/run/${runId}/cancel`, {
+      method: 'POST',
+    });
+
+    await assertOk(res, 'Failed to cancel pahcer run');
   }
 };

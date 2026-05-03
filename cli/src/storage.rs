@@ -4,7 +4,7 @@ use std::{
     env,
     hash::{Hash, Hasher},
     io,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
@@ -97,6 +97,10 @@ impl Storage {
         self.result_dir(timestamp).join("result.json")
     }
 
+    pub fn result_snapshot_path(&self, timestamp: &str) -> PathBuf {
+        self.result_dir(timestamp).join("result.snapshot.json")
+    }
+
     pub fn additional_path(&self, timestamp: &str) -> PathBuf {
         self.result_dir(timestamp).join("additional.json")
     }
@@ -133,6 +137,18 @@ impl Storage {
 
     pub async fn get_jobs(&self) -> Result<Vec<JobMetadata>, AppError> {
         self.read_json_or_default(&self.jobs_path()).await
+    }
+
+    pub async fn run_id_exists(&self, run_id: &str) -> Result<bool, AppError> {
+        if self.get_jobs().await?.iter().any(|job| job.id == run_id) {
+            return Ok(true);
+        }
+
+        match fs::metadata(self.result_dir(run_id)).await {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error.into()),
+        }
     }
 
     pub async fn save_job(&self, job: JobMetadata) -> Result<(), AppError> {
@@ -188,19 +204,17 @@ impl Storage {
         fs::metadata(&source_path).await?;
 
         let destination = self.result_path(timestamp);
+        let snapshot = self.result_snapshot_path(timestamp);
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent).await?;
         }
         remove_file_if_exists(&destination).await?;
+        remove_file_if_exists(&snapshot).await?;
 
         match mode {
             ResultJsonMode::Symlink => {
-                let parent = destination.parent().ok_or_else(|| {
-                    AppError::Internal("result.json parent directory is missing".to_string())
-                })?;
-                let target = path_relative_from(&source_path, parent)
-                    .unwrap_or_else(|| source_path.clone());
-                create_symlink(&target, &destination)?
+                fs::copy(&source_path, &snapshot).await?;
+                create_symlink(Path::new("result.snapshot.json"), &destination)?
             }
             ResultJsonMode::Copy => {
                 fs::copy(&source_path, &destination).await?;
@@ -478,41 +492,6 @@ async fn remove_file_if_exists(path: &Path) -> Result<(), AppError> {
     }
 }
 
-fn path_relative_from(target: &Path, base_dir: &Path) -> Option<PathBuf> {
-    let target_components = normalized_components(target)?;
-    let base_components = normalized_components(base_dir)?;
-
-    let common_len = target_components
-        .iter()
-        .zip(base_components.iter())
-        .take_while(|(left, right)| left == right)
-        .count();
-
-    let mut relative = PathBuf::new();
-    for _ in common_len..base_components.len() {
-        relative.push("..");
-    }
-    for component in target_components.iter().skip(common_len) {
-        relative.push(component);
-    }
-
-    Some(relative)
-}
-
-fn normalized_components(path: &Path) -> Option<Vec<PathBuf>> {
-    let mut components = Vec::new();
-    for component in path.components() {
-        match component {
-            Component::Prefix(prefix) => components.push(PathBuf::from(prefix.as_os_str())),
-            Component::RootDir => components.push(PathBuf::from(component.as_os_str())),
-            Component::CurDir => {}
-            Component::ParentDir => return None,
-            Component::Normal(value) => components.push(PathBuf::from(value)),
-        }
-    }
-    Some(components)
-}
-
 #[cfg(unix)]
 fn create_symlink(target: &Path, destination: &Path) -> Result<(), AppError> {
     std::os::unix::fs::symlink(target, destination)?;
@@ -709,7 +688,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn materialize_result_json_uses_relative_symlink_by_default_mode() {
+    async fn materialize_result_json_uses_local_snapshot_symlink_by_default_mode() {
         let dir = tempdir().unwrap();
         let storage = Storage::new(dir.path()).unwrap();
 
@@ -730,7 +709,13 @@ mod tests {
         let metadata = stdfs::symlink_metadata(&link_path).unwrap();
         assert!(metadata.file_type().is_symlink());
         let target = stdfs::read_link(&link_path).unwrap();
-        assert_eq!(target, PathBuf::from("../../../pahcer/json/result_20260314_151401.json"));
+        assert_eq!(target, PathBuf::from("result.snapshot.json"));
+        assert_eq!(
+            fs::read_to_string(storage.result_snapshot_path("123"))
+                .await
+                .unwrap(),
+            "{\"comment\":\"memo\"}"
+        );
         assert_eq!(
             fs::read_to_string(&link_path).await.unwrap(),
             "{\"comment\":\"memo\"}"

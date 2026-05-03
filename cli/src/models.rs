@@ -166,6 +166,7 @@ pub enum JobStatus {
     Running,
     Success,
     Failed,
+    Canceled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -197,8 +198,17 @@ pub struct InitRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 #[serde(default, rename_all = "camelCase")]
 pub struct RunRequest {
+    pub run_id: String,
     pub args: Vec<String>,
     pub directory: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RunTerminationReason {
+    Completed,
+    Failed,
+    Canceled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,7 +216,12 @@ pub struct RunRequest {
 pub enum StreamMessage {
     Stdout { data: String },
     Stderr { data: String },
-    Exit { code: i32 },
+    Exit {
+        code: i32,
+        #[serde(rename = "runId", alias = "run_id")]
+        run_id: String,
+        reason: RunTerminationReason,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]

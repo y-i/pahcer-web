@@ -7,6 +7,7 @@ import {
   type PersistedTestRunOptions,
   type RunLogEntry,
   type RunStreamEvent,
+  type RunTerminationReason,
   type TestRunNotificationSettings,
   type TestRunOptions,
 } from './api';
@@ -23,6 +24,7 @@ import {
 
 interface TestRunState {
   isRunning: boolean;
+  status: 'idle' | 'running' | 'canceling' | 'succeeded' | 'failed' | 'canceled';
   logs: RunLogEntry[];
   currentCommand: string;
   lastExitCode: number | null;
@@ -34,11 +36,13 @@ interface TestRunState {
     permission: NotificationSupportState;
   };
   activeRunId: number;
+  activeRunRequestId: string | null;
   lastNotifiedRunId: number | null;
 }
 
 const initialState: TestRunState = {
   isRunning: false,
+  status: 'idle',
   logs: [],
   currentCommand: '',
   lastExitCode: null,
@@ -50,6 +54,7 @@ const initialState: TestRunState = {
     permission: getNotificationSupportState(),
   },
   activeRunId: 0,
+  activeRunRequestId: null,
   lastNotifiedRunId: null,
 };
 
@@ -181,6 +186,14 @@ function buildCommand(args: string[]): string {
   return ['pahcer', 'run', ...args].join(' ');
 }
 
+function createRunId(): string {
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return `run-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function appendRunLog(type: RunLogEntry['type'], text: string): void {
   testRunState.update((state) => ({
     ...state,
@@ -201,8 +214,20 @@ function resetNotificationSelection(defaults: TestRunNotificationSettings): void
   }));
 }
 
+function terminalStatusFromReason(reason: RunTerminationReason, code: number): TestRunState['status'] {
+  if (reason === 'canceled') {
+    return 'canceled';
+  }
+
+  return code === 0 ? 'succeeded' : 'failed';
+}
+
 function handleRunExit(event: Extract<RunStreamEvent, { type: 'exit' }>, runId: number, notifyOnCompletion: boolean): void {
-  appendRunLog('info', `Process exited with code ${event.code}`);
+  const nextStatus = terminalStatusFromReason(event.reason, event.code);
+  appendRunLog(
+    'info',
+    event.reason === 'canceled' ? 'Run canceled.' : `Process exited with code ${event.code}`,
+  );
 
   const snapshot = get(testRunState);
   const defaultEnabled = snapshot.notifications.defaultEnabled;
@@ -210,7 +235,9 @@ function handleRunExit(event: Extract<RunStreamEvent, { type: 'exit' }>, runId: 
   testRunState.update((state) => ({
     ...state,
     isRunning: false,
-    lastExitCode: event.code,
+    status: nextStatus,
+    lastExitCode: event.reason === 'canceled' ? null : event.code,
+    activeRunRequestId: null,
     options: {
       ...state.options,
       comment: '',
@@ -218,7 +245,7 @@ function handleRunExit(event: Extract<RunStreamEvent, { type: 'exit' }>, runId: 
     },
   }));
 
-  if (notifyOnCompletion && snapshot.lastNotifiedRunId !== runId) {
+  if (event.reason !== 'canceled' && notifyOnCompletion && snapshot.lastNotifiedRunId !== runId) {
     const didNotify = sendRunCompleteNotification(snapshot.currentCommand, event.code, runId);
     if (didNotify) {
       testRunState.update((state) => ({
@@ -246,11 +273,13 @@ export async function startTestRun(): Promise<void> {
   const args = buildArgs(snapshot.options);
   const command = buildCommand(args);
   const runId = snapshot.activeRunId + 1;
+  const runRequestId = createRunId();
   const notifyOnCompletion = snapshot.notifications.currentEnabled;
 
   testRunState.update((state) => ({
     ...state,
     isRunning: true,
+    status: 'running',
     logs: [
       { type: 'info', text: 'Starting pahcer run...' },
       { type: 'info', text: `Command: ${command}` },
@@ -258,12 +287,17 @@ export async function startTestRun(): Promise<void> {
     currentCommand: command,
     lastExitCode: null,
     activeRunId: runId,
+    activeRunRequestId: runRequestId,
   }));
 
   try {
-    await api.runPahcer(args, (event) => {
+    await api.runPahcer({ runId: runRequestId, args }, (event) => {
       if (event.type === 'stdout' || event.type === 'stderr') {
         appendRunLog(event.type, event.data);
+        return;
+      }
+
+      if (event.runId !== runRequestId) {
         return;
       }
 
@@ -276,7 +310,9 @@ export async function startTestRun(): Promise<void> {
     testRunState.update((state) => ({
       ...state,
       isRunning: false,
+      status: 'failed',
       lastExitCode: null,
+      activeRunRequestId: null,
       options: {
         ...state.options,
         comment: '',
@@ -284,5 +320,35 @@ export async function startTestRun(): Promise<void> {
       },
     }));
     resetNotificationSelection({ testRunCompleted: defaultEnabled });
+  }
+}
+
+export async function cancelTestRun(): Promise<void> {
+  const snapshot = get(testRunState);
+  if (!snapshot.isRunning || snapshot.status !== 'running' || !snapshot.activeRunRequestId) {
+    return;
+  }
+
+  const runRequestId = snapshot.activeRunRequestId;
+  appendRunLog('info', 'Cancel requested...');
+  testRunState.update((state) => ({
+    ...state,
+    status: 'canceling',
+  }));
+
+  try {
+    await api.cancelRun(runRequestId);
+  } catch (error) {
+    appendRunLog('stderr', `Cancel failed: ${String(error)}`);
+    testRunState.update((state) => {
+      if (state.activeRunRequestId !== runRequestId || state.status !== 'canceling') {
+        return state;
+      }
+
+      return {
+        ...state,
+        status: 'running',
+      };
+    });
   }
 }

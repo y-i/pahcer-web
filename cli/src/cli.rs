@@ -72,6 +72,7 @@ fn resolve_directory_for_server(directory: PathBuf) -> Result<PathBuf, AppError>
 
 fn build_run_request(directory: PathBuf, args: Vec<String>) -> Result<RunRequest, AppError> {
     Ok(RunRequest {
+        run_id: String::new(),
         args,
         directory: Some(resolve_directory_for_server(directory)?),
     })
@@ -123,7 +124,7 @@ async fn bridge_run_command(
                 match serde_json::from_value::<StreamMessage>(message)? {
                     StreamMessage::Stdout { data } => stdout.write_all(data.as_bytes()).await?,
                     StreamMessage::Stderr { data } => stderr.write_all(data.as_bytes()).await?,
-                    StreamMessage::Exit { code } => exit_code = code,
+                    StreamMessage::Exit { code, .. } => exit_code = code,
                 }
             }
         }
