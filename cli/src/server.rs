@@ -12,13 +12,18 @@ use std::{
 use axum::{
     Json, Router,
     body::Body,
-    extract::{Path as AxumPath, State},
-    http::{HeaderValue, Response, StatusCode, header},
+    extract::{Path as AxumPath, Request, State},
+    http::{HeaderValue, Response, StatusCode, Uri, header},
     routing::{delete, get, post},
 };
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
+use hyper::header::HOST;
+use hyper_util::{
+    client::legacy::{Client as HyperClient, connect::HttpConnector},
+    rt::TokioExecutor,
+};
 use mime_guess::from_path;
 use serde_json::{Value, json};
 use tokio::{
@@ -29,7 +34,6 @@ use tokio::{
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::io::ReaderStream;
-use tower_http::services::{ServeDir, ServeFile};
 
 use crate::{
     analysis::{download_analysis_html, generate_input_csv, generate_result_csv},
@@ -44,12 +48,33 @@ use crate::{
     visualizer::{download_recursive, inject_output_loader},
 };
 
+type FrontendProxyClient = HyperClient<HttpConnector, Body>;
+
+#[derive(Debug, Clone)]
+pub enum FrontendTarget {
+    Static(PathBuf),
+    Proxy(url::Url),
+}
+
+impl From<PathBuf> for FrontendTarget {
+    fn from(path: PathBuf) -> Self {
+        Self::Static(path)
+    }
+}
+
+impl From<url::Url> for FrontendTarget {
+    fn from(url: url::Url) -> Self {
+        Self::Proxy(url)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AppState {
     pub base_dir: PathBuf,
     pub storage: Storage,
     pub client: reqwest::Client,
-    pub frontend_dist_dir: PathBuf,
+    pub frontend_target: FrontendTarget,
+    pub frontend_proxy_client: FrontendProxyClient,
     pub pahcer_program: PathBuf,
     pub init_lock: Arc<Mutex<()>>,
     pub run_lock: Arc<Mutex<()>>,
@@ -99,20 +124,13 @@ impl RunCompletion {
 pub struct UiServerOptions {
     pub base_dir: PathBuf,
     pub port: u16,
-    pub build_frontend: bool,
-    pub frontend_dir: Option<PathBuf>,
     pub pahcer_program: Option<PathBuf>,
 }
 
 pub async fn start_ui_server(options: UiServerOptions) -> Result<(), AppError> {
     let base_dir = options.base_dir.canonicalize().unwrap_or(options.base_dir);
-    let frontend_dir = options.frontend_dir.unwrap_or_else(default_frontend_dir);
-
-    if options.build_frontend {
-        build_frontend(&frontend_dir).await?;
-    }
-
-    let state = build_state(base_dir, frontend_dir.join("dist"), options.pahcer_program).await?;
+    let frontend_target = resolve_frontend_target(&staged_frontend_dir()).await?;
+    let state = build_state(base_dir, frontend_target, options.pahcer_program).await?;
     let app = build_app(state.clone());
     let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, options.port)).await?;
     println!("Starting server on http://localhost:{}", options.port);
@@ -123,7 +141,7 @@ pub async fn start_ui_server(options: UiServerOptions) -> Result<(), AppError> {
 
 pub async fn build_state(
     base_dir: PathBuf,
-    frontend_dist_dir: PathBuf,
+    frontend_target: impl Into<FrontendTarget>,
     pahcer_program: Option<PathBuf>,
 ) -> Result<AppState, AppError> {
     let storage = Storage::new(base_dir.clone())?;
@@ -132,7 +150,8 @@ pub async fn build_state(
         base_dir,
         storage,
         client: reqwest::Client::new(),
-        frontend_dist_dir,
+        frontend_target: frontend_target.into(),
+        frontend_proxy_client: HyperClient::builder(TokioExecutor::new()).build_http(),
         pahcer_program: pahcer_program
             .or_else(|| std::env::var_os("PAHCER_WEB_PAHCER_BIN").map(PathBuf::from))
             .unwrap_or_else(|| PathBuf::from("pahcer")),
@@ -143,11 +162,7 @@ pub async fn build_state(
 }
 
 pub fn build_app(state: AppState) -> Router {
-    let dist_dir = state.frontend_dist_dir.clone();
-    let fallback =
-        ServeDir::new(&dist_dir).not_found_service(ServeFile::new(dist_dir.join("index.html")));
-
-    Router::new()
+    let app = Router::new()
         .route("/api/config", get(get_config))
         .route("/api/init", post(run_init))
         .route("/api/config/global", post(save_global_config))
@@ -172,9 +187,156 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/analysis/{contest}/result.csv",
             get(get_analysis_result_csv),
+        );
+
+    match &state.frontend_target {
+        FrontendTarget::Static(_) => app.fallback(static_frontend_request).with_state(state),
+        FrontendTarget::Proxy(_) => app.fallback(proxy_frontend_request).with_state(state),
+    }
+}
+
+async fn static_frontend_request(
+    State(state): State<AppState>,
+    request: Request,
+) -> Result<Response<Body>, AppError> {
+    let dist_dir = match &state.frontend_target {
+        FrontendTarget::Static(dist_dir) => dist_dir,
+        FrontendTarget::Proxy(_) => {
+            return Err(AppError::NotFound(
+                "Static frontend assets are not configured".to_string(),
+            ));
+        }
+    };
+
+    serve_frontend_asset(dist_dir, request.uri().path()).await
+}
+
+async fn proxy_frontend_request(
+    State(state): State<AppState>,
+    mut request: Request<Body>,
+) -> Result<Response<Body>, AppError> {
+    let target = match &state.frontend_target {
+        FrontendTarget::Proxy(target) => target.clone(),
+        FrontendTarget::Static(_) => {
+            return Err(AppError::NotFound(
+                "Frontend dev server proxy is not configured".to_string(),
+            ));
+        }
+    };
+
+    let request_upgrade = is_upgrade_request(request.headers()).then(|| hyper::upgrade::on(&mut request));
+
+    *request.uri_mut() = frontend_proxy_uri(&target, request.uri())?;
+    set_proxy_host_header(request.headers_mut(), &target)?;
+
+    let mut response = state
+        .frontend_proxy_client
+        .request(request)
+        .await
+        .map_err(|error| AppError::Internal(format!("Failed to proxy frontend request: {error}")))?;
+
+    let response_upgrade = (response.status() == StatusCode::SWITCHING_PROTOCOLS)
+        .then(|| hyper::upgrade::on(&mut response));
+
+    if let (Some(request_upgrade), Some(response_upgrade)) = (request_upgrade, response_upgrade) {
+        tokio::spawn(async move {
+            let Ok(request_upgraded) = request_upgrade.await else {
+                return;
+            };
+            let Ok(response_upgraded) = response_upgrade.await else {
+                return;
+            };
+
+            let mut request_upgraded = hyper_util::rt::TokioIo::new(request_upgraded);
+            let mut response_upgraded = hyper_util::rt::TokioIo::new(response_upgraded);
+            let _ = tokio::io::copy_bidirectional(&mut request_upgraded, &mut response_upgraded)
+                .await;
+        });
+    }
+
+    Ok(response.map(Body::new))
+}
+
+fn is_upgrade_request(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get(header::CONNECTION)
+        .and_then(|value| value.to_str().ok())
+        .map(|value| value.to_ascii_lowercase().contains("upgrade"))
+        .unwrap_or(false)
+        || headers.contains_key(header::UPGRADE)
+}
+
+fn frontend_proxy_uri(target: &url::Url, request_uri: &Uri) -> Result<Uri, AppError> {
+    let mut url = target.clone();
+    url.set_path(request_uri.path());
+    url.set_query(request_uri.query());
+    url.as_str()
+        .parse()
+        .map_err(|error| AppError::Internal(format!("Invalid frontend dev server URL: {error}")))
+}
+
+fn set_proxy_host_header(
+    headers: &mut axum::http::HeaderMap,
+    target: &url::Url,
+) -> Result<(), AppError> {
+    let authority = target
+        .host_str()
+        .map(|host| match target.port() {
+            Some(port) => format!("{host}:{port}"),
+            None => host.to_string(),
+        })
+        .ok_or_else(|| AppError::Internal("Frontend dev server URL must include a host".to_string()))?;
+
+    let header_value = HeaderValue::from_str(&authority)
+        .map_err(|error| AppError::Internal(format!("Invalid frontend dev server host: {error}")))?;
+    headers.insert(HOST, header_value);
+    Ok(())
+}
+
+async fn serve_frontend_asset(dist_dir: &Path, request_path: &str) -> Result<Response<Body>, AppError> {
+    let relative_path = sanitize_relative_path(request_path);
+    let asset_path = relative_path
+        .as_ref()
+        .filter(|path| !path.as_os_str().is_empty())
+        .map(|path| dist_dir.join(path))
+        .filter(|path| path.is_file())
+        .unwrap_or_else(|| dist_dir.join("index.html"));
+
+    let content = fs::read(&asset_path).await.map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            AppError::NotFound(format!(
+                "Frontend asset not found: {}",
+                asset_path.display()
+            ))
+        } else {
+            AppError::Io(error)
+        }
+    })?;
+
+    let mime = from_path(&asset_path).first_or_octet_stream();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(
+            header::CONTENT_TYPE,
+            HeaderValue::from_str(mime.as_ref())
+                .unwrap_or(HeaderValue::from_static("application/octet-stream")),
         )
-        .with_state(state)
-        .fallback_service(fallback)
+        .body(Body::from(content))
+        .map_err(|error| AppError::Internal(error.to_string()))
+}
+
+fn sanitize_relative_path(request_path: &str) -> Option<PathBuf> {
+    let mut relative_path = PathBuf::new();
+
+    for component in Path::new(request_path.trim_start_matches('/')).components() {
+        match component {
+            std::path::Component::Normal(segment) => relative_path.push(segment),
+            std::path::Component::CurDir => {}
+            _ => return None,
+        }
+    }
+
+    Some(relative_path)
 }
 
 async fn get_config(State(state): State<AppState>) -> Result<Json<ConfigResponse>, AppError> {
@@ -882,29 +1044,29 @@ fn csv_response(csv: String) -> Result<Response<Body>, AppError> {
         .map_err(|error| AppError::Internal(error.to_string()))
 }
 
-async fn build_frontend(frontend_dir: &Path) -> Result<(), AppError> {
-    let status = Command::new("npm")
-        .arg("run")
-        .arg("build")
-        .current_dir(frontend_dir)
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .await?;
-
-    if status.success() {
-        Ok(())
-    } else {
-        Err(AppError::CommandFailed(
-            "Failed to build frontend".to_string(),
-        ))
+async fn resolve_frontend_target(
+    frontend_assets_dir: &Path,
+) -> Result<FrontendTarget, AppError> {
+    if let Some(frontend_dev_url) = std::env::var_os("FRONTEND_DEV_URL") {
+        let frontend_dev_url = frontend_dev_url.to_string_lossy().to_string();
+        let url = url::Url::parse(&frontend_dev_url).map_err(|error| {
+            AppError::BadRequest(format!("Invalid FRONTEND_DEV_URL value '{frontend_dev_url}': {error}"))
+        })?;
+        return Ok(FrontendTarget::Proxy(url));
     }
+
+    if frontend_assets_dir.join("index.html").is_file() {
+        return Ok(FrontendTarget::Static(frontend_assets_dir.to_path_buf()));
+    }
+
+    Err(AppError::NotFound(format!(
+        "Frontend assets were not found in {}. Run `pnpm turbo run build` before starting pahcer-web ui.",
+        frontend_assets_dir.display()
+    )))
 }
 
-fn default_frontend_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("frontend")
+fn staged_frontend_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("frontend-assets")
 }
 
 async fn copy_output_files(
@@ -998,18 +1160,26 @@ mod tests {
     use axum::{body::Body, http::Request};
     use http_body_util::BodyExt;
     use tempfile::tempdir;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
     use tokio::sync::Mutex as AsyncMutex;
     use tower::ServiceExt;
+    use url::Url;
 
     use crate::{
         models::{
             GlobalConfig, HistoryScoreDisplayFormat, LocalConfig, ResultJsonMode,
             VisualizerInitialScrollPosition, VisualizerPosition,
         },
-        server::{RunCompletion, build_app, build_state},
+        server::{FrontendTarget, RunCompletion, build_app, build_state},
     };
 
     struct XdgConfigHomeGuard {
+        previous: Option<OsString>,
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
         previous: Option<OsString>,
     }
 
@@ -1036,9 +1206,56 @@ mod tests {
         }
     }
 
+    impl EnvVarGuard {
+        fn unset(key: &'static str) -> Self {
+            let previous = std::env::var_os(key);
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match self.previous.as_ref() {
+                Some(value) => unsafe {
+                    std::env::set_var(self.key, value);
+                },
+                None => unsafe {
+                    std::env::remove_var(self.key);
+                },
+            }
+        }
+    }
+
     fn xdg_config_home_lock() -> Arc<AsyncMutex<()>> {
         static LOCK: OnceLock<Arc<AsyncMutex<()>>> = OnceLock::new();
         LOCK.get_or_init(|| Arc::new(AsyncMutex::new(()))).clone()
+    }
+
+    async fn spawn_proxy_server(response_body: &'static str) -> Url {
+        let listener = TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .unwrap();
+        let address = listener.local_addr().unwrap();
+
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut buffer = [0_u8; 4096];
+            let _ = stream.read(&mut buffer).await.unwrap();
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-length: {}\r\ncontent-type: text/plain; charset=utf-8\r\nconnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+
+            stream.write_all(response.as_bytes()).await.unwrap();
+            stream.shutdown().await.unwrap();
+        });
+
+        Url::parse(&format!("http://{address}")).unwrap()
     }
 
     #[tokio::test]
@@ -1230,6 +1447,246 @@ mod tests {
             )
             .unwrap();
             assert_eq!(saved["historyScoreDisplayFormat"], expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn static_frontend_fallback_serves_index_html() {
+        let dir = tempdir().unwrap();
+        let frontend = dir.path().join("frontend-assets");
+        tokio::fs::create_dir_all(&frontend).await.unwrap();
+        tokio::fs::write(frontend.join("index.html"), "<html>static app</html>")
+            .await
+            .unwrap();
+
+        let state = build_state(
+            dir.path().to_path_buf(),
+            FrontendTarget::Static(frontend),
+            Some(dir.path().join("fake-pahcer")),
+        )
+        .await
+        .unwrap();
+        let app = build_app(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/dashboard")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(String::from_utf8_lossy(&body), "<html>static app</html>");
+    }
+
+    #[tokio::test]
+    async fn proxy_frontend_fallback_forwards_unknown_routes() {
+        let dir = tempdir().unwrap();
+        let proxy_url = spawn_proxy_server("proxied app").await;
+
+        let state = build_state(
+            dir.path().to_path_buf(),
+            FrontendTarget::Proxy(proxy_url),
+            Some(dir.path().join("fake-pahcer")),
+        )
+        .await
+        .unwrap();
+        let app = build_app(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/dashboard")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(String::from_utf8_lossy(&body), "proxied app");
+    }
+
+    #[tokio::test]
+    async fn proxy_mode_keeps_api_routes_on_backend() {
+        let dir = tempdir().unwrap();
+        let lock = xdg_config_home_lock();
+        let _lock = lock.lock().await;
+        let _guard = XdgConfigHomeGuard::set(dir.path());
+        let proxy_url = spawn_proxy_server("proxied app").await;
+
+        let state = build_state(
+            dir.path().to_path_buf(),
+            FrontendTarget::Proxy(proxy_url),
+            Some(dir.path().join("fake-pahcer")),
+        )
+        .await
+        .unwrap();
+        let app = build_app(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/config")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["initializationState"], "uninitialized");
+    }
+
+    #[tokio::test]
+    async fn proxy_mode_keeps_visualizer_routes_on_backend() {
+        let dir = tempdir().unwrap();
+        let lock = xdg_config_home_lock();
+        let _lock = lock.lock().await;
+        let _guard = XdgConfigHomeGuard::set(dir.path());
+        let proxy_url = spawn_proxy_server("proxied app").await;
+
+        let visualizer_dir = dir.path().join(".pahcer-web/visualizer/assets");
+        tokio::fs::create_dir_all(&visualizer_dir).await.unwrap();
+        tokio::fs::write(
+            dir.path().join(".pahcer-web/visualizer/index.html"),
+            "<html><body>visualizer</body></html>",
+        )
+        .await
+        .unwrap();
+        tokio::fs::write(visualizer_dir.join("app.js"), "console.log('visualizer');")
+            .await
+            .unwrap();
+
+        let state = build_state(
+            dir.path().to_path_buf(),
+            FrontendTarget::Proxy(proxy_url),
+            Some(dir.path().join("fake-pahcer")),
+        )
+        .await
+        .unwrap();
+        let app = build_app(state);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/visualizer.html")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert!(String::from_utf8_lossy(&body).contains("visualizer"));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/visualizer/assets/app.js")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(String::from_utf8_lossy(&body), "console.log('visualizer');");
+    }
+
+    #[tokio::test]
+    async fn proxy_mode_keeps_analysis_routes_on_backend() {
+        let dir = tempdir().unwrap();
+        let lock = xdg_config_home_lock();
+        let _lock = lock.lock().await;
+        let _guard = XdgConfigHomeGuard::set(dir.path());
+        let proxy_url = spawn_proxy_server("proxied app").await;
+
+        tokio::fs::create_dir_all(dir.path().join(".pahcer-web"))
+            .await
+            .unwrap();
+        tokio::fs::write(
+            dir.path().join(".pahcer-web/analysis.html"),
+            "<html><body>analysis</body></html>",
+        )
+        .await
+        .unwrap();
+        tokio::fs::create_dir_all(dir.path().join("tools/in"))
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("tools/seeds.txt"), "7\n")
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("tools/in/0000.txt"), "1 2\n")
+            .await
+            .unwrap();
+
+        let state = build_state(
+            dir.path().to_path_buf(),
+            FrontendTarget::Proxy(proxy_url),
+            Some(dir.path().join("fake-pahcer")),
+        )
+        .await
+        .unwrap();
+        let app = build_app(state);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/analysis/index.html")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(String::from_utf8_lossy(&body), "<html><body>analysis</body></html>");
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/analysis/ahc999/input.csv")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), 200);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let text = String::from_utf8_lossy(&body);
+        assert!(text.contains("file,seed,N,M"));
+        assert!(text.contains("0000.txt,7,1,2"));
+    }
+
+    #[tokio::test]
+    async fn resolve_frontend_target_requires_staged_assets_without_dev_proxy() {
+        let _guard = EnvVarGuard::unset("FRONTEND_DEV_URL");
+        let dir = tempdir().unwrap();
+
+        let error = super::resolve_frontend_target(&dir.path().join("frontend-assets"))
+            .await
+            .unwrap_err();
+
+        match error {
+            crate::error::AppError::NotFound(message) => {
+                assert!(message.contains("pnpm turbo run build"));
+                assert!(message.contains("frontend-assets"));
+            }
+            other => panic!("unexpected error: {other:?}"),
         }
     }
 }

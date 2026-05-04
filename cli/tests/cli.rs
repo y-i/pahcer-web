@@ -21,7 +21,10 @@ fn ui_help_lists_global_directory_option() {
     command
         .assert()
         .success()
-        .stdout(predicates::str::contains("-d, --dir <DIRECTORY>"));
+        .stdout(
+            predicates::str::contains("-d, --dir <DIRECTORY>")
+                .and(predicates::str::contains("--no-build").not()),
+        );
 }
 
 #[test]

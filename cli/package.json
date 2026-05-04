@@ -1,0 +1,10 @@
+{
+  "name": "cli",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "FRONTEND_DEV_URL=http://127.0.0.1:5173 cargo watch -x \"run -- ui --port ${PAHCER_WEB_PORT:-10432}\"",
+    "build": "node scripts/stage-frontend.mjs && cargo build --release",
+    "publish": "node scripts/publish.mjs"
+  }
+}

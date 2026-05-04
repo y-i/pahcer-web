@@ -29,8 +29,6 @@ pub enum Commands {
 pub struct UiArgs {
     #[arg(short, long, default_value_t = 10432)]
     pub port: u16,
-    #[arg(long = "no-build", default_value_t = false)]
-    pub no_build: bool,
 }
 
 #[derive(Debug, Args)]
@@ -49,8 +47,6 @@ pub async fn run_cli(cli: Cli) -> Result<ExitCode, AppError> {
             start_ui_server(UiServerOptions {
                 base_dir: directory,
                 port: args.port,
-                build_frontend: !args.no_build,
-                frontend_dir: None,
                 pahcer_program: None,
             })
             .await?;

@@ -4,6 +4,8 @@ dist
 *.log
 cli/target
 
+.turbo
+
 .vscode
 
 .agents
@@ -12,3 +14,5 @@ cli/target
 .pahcer-web
 
 for-gemini-memo.md
+
+cli/frontend-assets
