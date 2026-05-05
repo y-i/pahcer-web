@@ -11,7 +11,7 @@
 
   const tabs = [
     { id: 'test-run', label: 'テスト実行' },
-    { id: 'history', label: '評価履歴' },
+    { id: 'history', label: '実行履歴' },
     { id: 'score-analysis', label: 'スコア分析' },
     { id: 'settings', label: '設定' },
   ];
