@@ -6,6 +6,7 @@ description = "Rust backend for pahcer-web"
 repository = "https://github.com/y-i/pahcer-web"
 license = "MIT"
 include = ["src/**", "Cargo.toml", "frontend-assets/**"]
+categories = ["command-line-utilities"]
 
 [dependencies]
 axum = "0.8.4"
