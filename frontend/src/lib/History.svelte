@@ -553,7 +553,7 @@
                             {:else}
                                 <h3 class="text-lg font-bold text-gray-900">Project Settings にビジュアライザ URL を設定してください</h3>
                                 <p class="mt-3 text-sm leading-6 text-gray-600">
-                                    評価履歴から visualizer を開くには、Project Settings の Project Visualizer URL を入力して保存し、
+                                    実行履歴から visualizer を開くには、Project Settings の Project Visualizer URL を入力して保存し、
                                     visualizer 本体をダウンロードする必要があります。
                                 </p>
                             {/if}

@@ -1,0 +1,23 @@
+{
+  "name": "pahcer-web",
+  "version": "1.0.0",
+  "description": "",
+  "private": true,
+  "packageManager": "pnpm@10.30.3",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "publish": "turbo run publish"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/y-i/pahcer-web.git"
+  },
+  "keywords": [],
+  "author": "y-i",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/y-i/pahcer-web/issues"
+  },
+  "homepage": "https://github.com/y-i/pahcer-web#readme"
+}

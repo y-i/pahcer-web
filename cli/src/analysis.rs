@@ -147,8 +147,7 @@ pub async fn generate_result_csv(
                     map.insert(seed, score_of(detail));
                 }
                 map
-            })
-            ;
+            });
 
         let mut scores = Vec::with_capacity(seeds.len());
         for seed in &seeds {

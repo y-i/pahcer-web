@@ -1,0 +1,38 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "dev": {
+      "cache": false,
+      "persistent": true,
+      "passThroughEnv": [
+        "PAHCER_WEB_PORT"
+      ]
+    },
+    "build": {
+      "dependsOn": [
+        "^build"
+      ],
+      "outputs": [
+        "dist/**",
+        "target/**",
+        "frontend-assets/**"
+      ]
+    },
+    "cli#build": {
+      "dependsOn": [
+        "frontend#build"
+      ],
+      "outputs": [
+        "target/**",
+        "frontend-assets/**"
+      ]
+    },
+    "publish": {
+      "dependsOn": [
+        "build"
+      ],
+      "cache": false,
+      "outputs": []
+    }
+  }
+}

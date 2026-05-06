@@ -1,6 +1,9 @@
 use std::{fs as stdfs, os::unix::fs::PermissionsExt, path::Path};
 
-use axum::{body::Body, http::{Request, StatusCode}};
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+};
 use http_body_util::BodyExt;
 use tempfile::tempdir;
 use tokio::fs;
@@ -15,7 +18,12 @@ async fn config_api_reports_uninitialized_and_invalid_states() {
 
     let response = app
         .clone()
-        .oneshot(Request::builder().uri("/api/config").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/api/config")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -29,7 +37,12 @@ async fn config_api_reports_uninitialized_and_invalid_states() {
 
     let response = app
         .clone()
-        .oneshot(Request::builder().uri("/api/config").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/api/config")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -56,7 +69,12 @@ problem_name = "ahc999"
     .unwrap();
 
     let response = app
-        .oneshot(Request::builder().uri("/api/config").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/api/config")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -113,7 +131,9 @@ EOF
 
     let response = app
         .clone()
-        .oneshot(init_request(r#"{"problem":"ahc999","objective":"max","language":"rust","interactive":true}"#))
+        .oneshot(init_request(
+            r#"{"problem":"ahc999","objective":"max","language":"rust","interactive":true}"#,
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
@@ -136,12 +156,19 @@ async fn init_api_rejects_empty_problem() {
     let app = build_test_app(dir.path(), dir.path().join("fake-pahcer")).await;
 
     let response = app
-        .oneshot(init_request(r#"{"problem":"   ","objective":"max","language":"rust","interactive":false}"#))
+        .oneshot(init_request(
+            r#"{"problem":"   ","objective":"max","language":"rust","interactive":false}"#,
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let json = read_json(response).await;
-    assert!(json["error"].as_str().unwrap().contains("Problem name is required"));
+    assert!(
+        json["error"]
+            .as_str()
+            .unwrap()
+            .contains("Problem name is required")
+    );
 }
 
 #[tokio::test]
@@ -157,12 +184,19 @@ async fn init_api_rejects_already_initialized_directory() {
     .unwrap();
 
     let response = app
-        .oneshot(init_request(r#"{"problem":"ahc999","objective":"max","language":"rust","interactive":false}"#))
+        .oneshot(init_request(
+            r#"{"problem":"ahc999","objective":"max","language":"rust","interactive":false}"#,
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::CONFLICT);
     let json = read_json(response).await;
-    assert!(json["error"].as_str().unwrap().contains("already initialized"));
+    assert!(
+        json["error"]
+            .as_str()
+            .unwrap()
+            .contains("already initialized")
+    );
 }
 
 #[tokio::test]
@@ -178,12 +212,19 @@ async fn init_api_treats_minimal_existing_config_as_initialized() {
     .unwrap();
 
     let response = app
-        .oneshot(init_request(r#"{"problem":"ahc999","objective":"max","language":"rust","interactive":false}"#))
+        .oneshot(init_request(
+            r#"{"problem":"ahc999","objective":"max","language":"rust","interactive":false}"#,
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::CONFLICT);
     let json = read_json(response).await;
-    assert!(json["error"].as_str().unwrap().contains("already initialized"));
+    assert!(
+        json["error"]
+            .as_str()
+            .unwrap()
+            .contains("already initialized")
+    );
 }
 
 #[tokio::test]
@@ -196,12 +237,19 @@ async fn init_api_rejects_invalid_existing_config() {
         .unwrap();
 
     let response = app
-        .oneshot(init_request(r#"{"problem":"ahc999","objective":"max","language":"rust","interactive":false}"#))
+        .oneshot(init_request(
+            r#"{"problem":"ahc999","objective":"max","language":"rust","interactive":false}"#,
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::CONFLICT);
     let json = read_json(response).await;
-    assert!(json["error"].as_str().unwrap().contains("invalid pahcer_config.toml"));
+    assert!(
+        json["error"]
+            .as_str()
+            .unwrap()
+            .contains("invalid pahcer_config.toml")
+    );
 }
 
 #[tokio::test]
@@ -219,7 +267,9 @@ exit 7
 
     let app = build_test_app(dir.path(), script_path).await;
     let response = app
-        .oneshot(init_request(r#"{"problem":"ahc999","objective":"max","language":"rust","interactive":false}"#))
+        .oneshot(init_request(
+            r#"{"problem":"ahc999","objective":"max","language":"rust","interactive":false}"#,
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -242,7 +292,9 @@ exit 0
 
     let app = build_test_app(dir.path(), script_path).await;
     let response = app
-        .oneshot(init_request(r#"{"problem":"ahc999","objective":"max","language":"rust","interactive":false}"#))
+        .oneshot(init_request(
+            r#"{"problem":"ahc999","objective":"max","language":"rust","interactive":false}"#,
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -267,7 +319,9 @@ exit 0
 
     let app = build_test_app(dir.path(), script_path).await;
     let response = app
-        .oneshot(init_request(r#"{"problem":"ahc999","objective":"max","language":"rust","interactive":false}"#))
+        .oneshot(init_request(
+            r#"{"problem":"ahc999","objective":"max","language":"rust","interactive":false}"#,
+        ))
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
@@ -310,7 +364,12 @@ EOF
     assert!(statuses.contains(&StatusCode::CONFLICT));
 
     let response = app
-        .oneshot(Request::builder().uri("/api/config").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/api/config")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);

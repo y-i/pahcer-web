@@ -1,10 +1,10 @@
 use std::{
-    collections::hash_map::DefaultHasher,
     collections::HashMap,
+    collections::hash_map::DefaultHasher,
     env,
     hash::{Hash, Hasher},
     io,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
@@ -97,6 +97,10 @@ impl Storage {
         self.result_dir(timestamp).join("result.json")
     }
 
+    pub fn result_snapshot_path(&self, timestamp: &str) -> PathBuf {
+        self.result_dir(timestamp).join("result.snapshot.json")
+    }
+
     pub fn additional_path(&self, timestamp: &str) -> PathBuf {
         self.result_dir(timestamp).join("additional.json")
     }
@@ -133,6 +137,18 @@ impl Storage {
 
     pub async fn get_jobs(&self) -> Result<Vec<JobMetadata>, AppError> {
         self.read_json_or_default(&self.jobs_path()).await
+    }
+
+    pub async fn run_id_exists(&self, run_id: &str) -> Result<bool, AppError> {
+        if self.get_jobs().await?.iter().any(|job| job.id == run_id) {
+            return Ok(true);
+        }
+
+        match fs::metadata(self.result_dir(run_id)).await {
+            Ok(_) => Ok(true),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error.into()),
+        }
     }
 
     pub async fn save_job(&self, job: JobMetadata) -> Result<(), AppError> {
@@ -175,7 +191,8 @@ impl Storage {
         timestamp: &str,
         additional: &AdditionalResultMetadata,
     ) -> Result<(), AppError> {
-        self.write_json(&self.additional_path(timestamp), additional).await
+        self.write_json(&self.additional_path(timestamp), additional)
+            .await
     }
 
     pub async fn materialize_result_json(
@@ -188,19 +205,17 @@ impl Storage {
         fs::metadata(&source_path).await?;
 
         let destination = self.result_path(timestamp);
+        let snapshot = self.result_snapshot_path(timestamp);
         if let Some(parent) = destination.parent() {
             fs::create_dir_all(parent).await?;
         }
         remove_file_if_exists(&destination).await?;
+        remove_file_if_exists(&snapshot).await?;
 
         match mode {
             ResultJsonMode::Symlink => {
-                let parent = destination.parent().ok_or_else(|| {
-                    AppError::Internal("result.json parent directory is missing".to_string())
-                })?;
-                let target = path_relative_from(&source_path, parent)
-                    .unwrap_or_else(|| source_path.clone());
-                create_symlink(&target, &destination)?
+                fs::copy(&source_path, &snapshot).await?;
+                create_symlink(Path::new("result.snapshot.json"), &destination)?
             }
             ResultJsonMode::Copy => {
                 fs::copy(&source_path, &destination).await?;
@@ -210,7 +225,9 @@ impl Storage {
         Ok(())
     }
 
-    pub async fn list_pahcer_result_files(&self) -> Result<HashMap<String, PahcerResultFileState>, AppError> {
+    pub async fn list_pahcer_result_files(
+        &self,
+    ) -> Result<HashMap<String, PahcerResultFileState>, AppError> {
         let mut entries = match fs::read_dir(self.pahcer_json_dir()).await {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -230,7 +247,10 @@ impl Storage {
             if file_name.starts_with("result_") && file_name.ends_with(".json") {
                 let metadata = entry.metadata().await?;
                 let content = fs::read(entry.path()).await?;
-                files.insert(file_name, PahcerResultFileState::from_content(&metadata, &content));
+                files.insert(
+                    file_name,
+                    PahcerResultFileState::from_content(&metadata, &content),
+                );
             }
         }
 
@@ -241,7 +261,10 @@ impl Storage {
         &self,
         file_name: &str,
     ) -> Result<Option<PahcerResultFile>, AppError> {
-        match self.read_result_file(self.pahcer_result_path(file_name)).await? {
+        match self
+            .read_result_file(self.pahcer_result_path(file_name))
+            .await?
+        {
             Some(result) => Ok(Some(result)),
             None => Ok(None),
         }
@@ -309,8 +332,16 @@ impl Storage {
         Ok(candidates
             .into_iter()
             .min_by(|left, right| {
-                let left_delta = left.2.signed_duration_since(run_started_at).num_milliseconds().abs();
-                let right_delta = right.2.signed_duration_since(run_started_at).num_milliseconds().abs();
+                let left_delta = left
+                    .2
+                    .signed_duration_since(run_started_at)
+                    .num_milliseconds()
+                    .abs();
+                let right_delta = right
+                    .2
+                    .signed_duration_since(run_started_at)
+                    .num_milliseconds()
+                    .abs();
                 left_delta
                     .cmp(&right_delta)
                     .then_with(|| right.2.cmp(&left.2))
@@ -365,7 +396,10 @@ impl Storage {
         Ok(())
     }
 
-    async fn read_history_entry(&self, result_dir: &Path) -> Result<Option<StoredResult>, AppError> {
+    async fn read_history_entry(
+        &self,
+        result_dir: &Path,
+    ) -> Result<Option<StoredResult>, AppError> {
         let additional_path = result_dir.join("additional.json");
         let additional = match fs::read_to_string(&additional_path).await {
             Ok(content) => match serde_json::from_str::<AdditionalResultMetadata>(&content) {
@@ -384,7 +418,9 @@ impl Storage {
             return Ok(None);
         };
 
-        Ok(Some(normalize_history_result(timestamp, additional, result)?))
+        Ok(Some(normalize_history_result(
+            timestamp, additional, result,
+        )?))
     }
 }
 
@@ -417,7 +453,10 @@ fn normalize_history_result(
         } else {
             additional.id
         },
-        datetime: normalize_datetime_source(&pahcer_result.start_time, &additional.result_file_name),
+        datetime: normalize_datetime_source(
+            &pahcer_result.start_time,
+            &additional.result_file_name,
+        ),
         args: additional.args,
         comment: pahcer_result.comment,
         tag: pahcer_result.tag_name.unwrap_or_default(),
@@ -476,41 +515,6 @@ async fn remove_file_if_exists(path: &Path) -> Result<(), AppError> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error.into()),
     }
-}
-
-fn path_relative_from(target: &Path, base_dir: &Path) -> Option<PathBuf> {
-    let target_components = normalized_components(target)?;
-    let base_components = normalized_components(base_dir)?;
-
-    let common_len = target_components
-        .iter()
-        .zip(base_components.iter())
-        .take_while(|(left, right)| left == right)
-        .count();
-
-    let mut relative = PathBuf::new();
-    for _ in common_len..base_components.len() {
-        relative.push("..");
-    }
-    for component in target_components.iter().skip(common_len) {
-        relative.push(component);
-    }
-
-    Some(relative)
-}
-
-fn normalized_components(path: &Path) -> Option<Vec<PathBuf>> {
-    let mut components = Vec::new();
-    for component in path.components() {
-        match component {
-            Component::Prefix(prefix) => components.push(PathBuf::from(prefix.as_os_str())),
-            Component::RootDir => components.push(PathBuf::from(component.as_os_str())),
-            Component::CurDir => {}
-            Component::ParentDir => return None,
-            Component::Normal(value) => components.push(PathBuf::from(value)),
-        }
-    }
-    Some(components)
 }
 
 #[cfg(unix)]
@@ -593,12 +597,7 @@ mod tests {
         let storage = Storage::new(dir.path()).unwrap();
 
         fs::create_dir_all(storage.result_dir("321")).await.unwrap();
-        fs::write(
-            storage.result_path("321"),
-            "{}",
-        )
-        .await
-        .unwrap();
+        fs::write(storage.result_path("321"), "{}").await.unwrap();
 
         let history = storage.read_history().await.unwrap();
         assert!(history.is_empty());
@@ -651,12 +650,9 @@ mod tests {
             )
             .await
             .unwrap();
-        fs::write(
-            storage.result_path("556"),
-            "{broken json",
-        )
-        .await
-        .unwrap();
+        fs::write(storage.result_path("556"), "{broken json")
+            .await
+            .unwrap();
 
         let history = storage.read_history().await.unwrap();
         assert!(history.is_empty());
@@ -709,7 +705,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn materialize_result_json_uses_relative_symlink_by_default_mode() {
+    async fn materialize_result_json_uses_local_snapshot_symlink_by_default_mode() {
         let dir = tempdir().unwrap();
         let storage = Storage::new(dir.path()).unwrap();
 
@@ -722,7 +718,11 @@ mod tests {
         .unwrap();
 
         storage
-            .materialize_result_json("123", "result_20260314_151401.json", ResultJsonMode::Symlink)
+            .materialize_result_json(
+                "123",
+                "result_20260314_151401.json",
+                ResultJsonMode::Symlink,
+            )
             .await
             .unwrap();
 
@@ -730,7 +730,13 @@ mod tests {
         let metadata = stdfs::symlink_metadata(&link_path).unwrap();
         assert!(metadata.file_type().is_symlink());
         let target = stdfs::read_link(&link_path).unwrap();
-        assert_eq!(target, PathBuf::from("../../../pahcer/json/result_20260314_151401.json"));
+        assert_eq!(target, PathBuf::from("result.snapshot.json"));
+        assert_eq!(
+            fs::read_to_string(storage.result_snapshot_path("123"))
+                .await
+                .unwrap(),
+            "{\"comment\":\"memo\"}"
+        );
         assert_eq!(
             fs::read_to_string(&link_path).await.unwrap(),
             "{\"comment\":\"memo\"}"

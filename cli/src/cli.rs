@@ -29,8 +29,6 @@ pub enum Commands {
 pub struct UiArgs {
     #[arg(short, long, default_value_t = 10432)]
     pub port: u16,
-    #[arg(long = "no-build", default_value_t = false)]
-    pub no_build: bool,
 }
 
 #[derive(Debug, Args)]
@@ -49,8 +47,6 @@ pub async fn run_cli(cli: Cli) -> Result<ExitCode, AppError> {
             start_ui_server(UiServerOptions {
                 base_dir: directory,
                 port: args.port,
-                build_frontend: !args.no_build,
-                frontend_dir: None,
                 pahcer_program: None,
             })
             .await?;
@@ -72,6 +68,7 @@ fn resolve_directory_for_server(directory: PathBuf) -> Result<PathBuf, AppError>
 
 fn build_run_request(directory: PathBuf, args: Vec<String>) -> Result<RunRequest, AppError> {
     Ok(RunRequest {
+        run_id: String::new(),
         args,
         directory: Some(resolve_directory_for_server(directory)?),
     })
@@ -123,7 +120,7 @@ async fn bridge_run_command(
                 match serde_json::from_value::<StreamMessage>(message)? {
                     StreamMessage::Stdout { data } => stdout.write_all(data.as_bytes()).await?,
                     StreamMessage::Stderr { data } => stderr.write_all(data.as_bytes()).await?,
-                    StreamMessage::Exit { code } => exit_code = code,
+                    StreamMessage::Exit { code, .. } => exit_code = code,
                 }
             }
         }
@@ -179,8 +176,7 @@ mod tests {
     #[test]
     fn directory_option_is_accepted_after_run_subcommand_without_entering_run_args() {
         let long =
-            Cli::try_parse_from(["pahcer-web", "run", "--dir", "contest", "-c", "memo"])
-                .unwrap();
+            Cli::try_parse_from(["pahcer-web", "run", "--dir", "contest", "-c", "memo"]).unwrap();
         assert_eq!(long.directory, PathBuf::from("contest"));
         match long.command {
             super::Commands::Run(args) => {
@@ -190,8 +186,7 @@ mod tests {
         }
 
         let short =
-            Cli::try_parse_from(["pahcer-web", "run", "-d", "contest", "-c", "memo"])
-                .unwrap();
+            Cli::try_parse_from(["pahcer-web", "run", "-d", "contest", "-c", "memo"]).unwrap();
         assert_eq!(short.directory, PathBuf::from("contest"));
         match short.command {
             super::Commands::Run(args) => {
@@ -204,8 +199,7 @@ mod tests {
     #[test]
     fn directory_option_after_delegated_run_args_is_left_in_run_args() {
         let cli =
-            Cli::try_parse_from(["pahcer-web", "run", "-c", "memo", "-d", "contest"])
-                .unwrap();
+            Cli::try_parse_from(["pahcer-web", "run", "-c", "memo", "-d", "contest"]).unwrap();
         assert_eq!(cli.directory, PathBuf::from("."));
         match cli.command {
             super::Commands::Run(args) => {
@@ -227,8 +221,8 @@ mod tests {
         let contest_dir = temp.path().join("contest");
         std::fs::create_dir_all(&contest_dir).unwrap();
 
-        let request = super::build_run_request(PathBuf::from(&contest_dir), vec!["-c".into()])
-            .unwrap();
+        let request =
+            super::build_run_request(PathBuf::from(&contest_dir), vec!["-c".into()]).unwrap();
 
         assert_eq!(request.args, vec!["-c"]);
         assert_eq!(request.directory, Some(contest_dir));
